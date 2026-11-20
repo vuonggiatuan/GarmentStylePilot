@@ -267,7 +267,65 @@ def run_scenario(base):
             "verified": True, "verifiedBy": "Pre-production Team",
             "notes": "Pre-production review"
         })
+    # Phase 5: the old manual checkbox is no longer sufficient for material readiness.
+    missing = assert_status(base, "GET", url + "/readiness")
+    assert not missing["ready"]
+    assert any("material coverage" in x.lower() for x in missing["blockers"])
+    assert any("ppc schedule" in x.lower() for x in missing["blockers"])
+
+    # Planned order 1000 pcs needs 1312.5m fabric and 1000 trims.
+    short_review = assert_status(base, "POST", url + "/material-reviews", {
+        "orderQuantity": 1000, "sourceReference": "PPC-STOCK-001",
+        "available": [
+            {"materialCode": "FAB-001", "unit": "m", "availableQuantity": 1300},
+            {"materialCode": "TRIM-001", "unit": "pcs", "availableQuantity": 1000}
+        ]
+    }, 201)
+    assert not short_review["review"]["fullyCovered"]
+    assert float(short_review["items"][0]["shortageQuantity"]) == 12.5
+    assert_status(base, "POST", f"/api/material-reviews/{short_review['review']['id']}/confirm",
+                  {"confirmedBy": "PPC Lead"}, 409)
+
+    assert_status(base, "POST", url + "/material-reviews", {
+        "orderQuantity": 1000, "sourceReference": "PPC-MISSING-ITEM",
+        "available": [{"materialCode": "FAB-001", "unit": "m", "availableQuantity": 2000}]
+    }, 400)
+    good_review = assert_status(base, "POST", url + "/material-reviews", {
+        "orderQuantity": 1000, "sourceReference": "PPC-STOCK-002",
+        "available": [
+            {"materialCode": "FAB-001", "unit": "m", "availableQuantity": 1320},
+            {"materialCode": "TRIM-001", "unit": "pcs", "availableQuantity": 1000}
+        ]
+    }, 201)
+    assert good_review["review"]["fullyCovered"]
+    confirmed_review = assert_status(base, "POST",
+        f"/api/material-reviews/{good_review['review']['id']}/confirm",
+        {"confirmedBy": "PPC Lead"})
+    assert confirmed_review["sourceType"] == "MANUAL_PPC_ATTESTATION"
+    assert len(assert_status(base, "GET", url + "/material-reviews")) == 2
+
+    def confirm_schedule(workstation_id):
+        schedule = assert_status(base, "POST", url + "/schedules", {
+            "productionLineId": line["id"], "workstationPlanId": workstation_id,
+            "orderQuantity": 1000, "targetDailyQuantity": 100,
+            "plannedStartDate": "2027-01-15",
+            "sourceReference": "PPC-PLAN-2027-01-15"
+        }, 201)
+        confirmed = assert_status(base, "POST",
+            f"/api/schedules/{schedule['schedule']['id']}/confirm",
+            {"confirmedBy": "PPC Planner"})
+        assert confirmed["status"] == "Confirmed"
+        assert confirmed["sourceType"] == "MANUAL_PPC_CONFIRMATION"
+        return confirmed
+
+    original_schedule = confirm_schedule(ws_plan["plan"]["id"])
     assert assert_status(base, "GET", url + "/readiness")["ready"]
+    print("✓ BOM-sized material shortage blocks PPC confirmation and schedule")
+    assert_status(base, "POST", url + "/release", {
+        "lineCode": "A01", "plannedStartDate": "2027-01-16",
+        "approvedBy": "Production Lead"
+    }, 409)
+    print("✓ PPC release date must match the confirmed schedule")
 
     # Editing IE routing must invalidate its approval, cost sheet, quote, and all previous checks.
     operations[1]["smvMinutes"] = 1.58
@@ -280,6 +338,7 @@ def run_scenario(base):
     assert any("Approved costing" in b for b in readiness["blockers"])
     assert any("line balance" in b.lower() for b in readiness["blockers"])
     assert any("workstation" in b.lower() for b in readiness["blockers"])
+    assert any("ppc schedule" in b.lower() for b in readiness["blockers"])
     assert_status(base, "POST", url + "/release", {
         "lineCode": "A01", "plannedStartDate": "2027-01-15",
         "approvedBy": "Production Lead"
@@ -297,6 +356,7 @@ def run_scenario(base):
     }, 201)
     assert_status(base, "POST", f"/api/workstation-plans/{fresh_ws['plan']['id']}/approve",
                   {"approvedBy": "IE Lead"})
+    confirm_schedule(fresh_ws["plan"]["id"])
     cost2 = assert_status(base, "POST", url + "/costs", {
         "minuteRate": 0.08, "overheadPerPiece": 0.5, "targetMarginPercent": 20
     }, 201)
@@ -334,6 +394,7 @@ def run_scenario(base):
     }, 201)
     assert_status(base, "POST", f"/api/workstation-plans/{renewed_ws['plan']['id']}/approve",
                   {"approvedBy": "IE Lead"})
+    confirm_schedule(renewed_ws["plan"]["id"])
     assert assert_status(base, "GET", url + "/readiness")["ready"]
     print("✓ new machine configuration invalidates historical line approvals")
 
@@ -363,6 +424,7 @@ def run_scenario(base):
     }, 201)
     assert_status(base, "POST", f"/api/workstation-plans/{current_ws['plan']['id']}/approve",
                   {"approvedBy": "IE Lead"})
+    final_schedule = confirm_schedule(current_ws["plan"]["id"])
     assert assert_status(base, "GET", url + "/readiness")["ready"]
     print("✓ skill changes invalidate old plans and require reapproval")
 
@@ -372,6 +434,21 @@ def run_scenario(base):
     }, 201)
     assert release["quoteId"] == quote2["id"]
     assert release["workstationPlanId"] == current_ws["plan"]["id"]
+    assert release["materialCoverageReviewId"] == good_review["review"]["id"]
+    assert release["productionScheduleConfirmationId"] == final_schedule["id"]
+    handover = assert_status(base, "GET", f"/api/releases/{release['id']}/handover")
+    assert handover["status"] == "ReadyForExport"
+    assert handover["payload"]["integration"]["deliveryPerformed"] is False
+    assert handover["payload"]["scheduleConfirmation"]["sourceType"] == "MANUAL_PPC_CONFIRMATION"
+    assert handover["payload"]["release"]["workstationPlanId"] == current_ws["plan"]["id"]
+    assert handover["payload"]["materialAttestation"]["orderQuantity"] == 1000
+    assert len(handover["payload"]["bom"]) == 2
+    assert len(handover["payload"]["ieOperations"]) == 2
+    assert all("assignedEmployeeCodes" not in x for x in handover["payload"]["workstations"])
+    repeated_handover = assert_status(base, "GET", f"/api/releases/{release['id']}/handover")
+    assert repeated_handover["outboxId"] == handover["outboxId"]
+    assert repeated_handover["payload"] == handover["payload"]
+    print("✓ release creates a stable stored export envelope, without transmitting to ERP/MES")
     assert_status(base, "POST", url + "/release", {
         "lineCode": "A02", "plannedStartDate": "2027-01-16",
         "approvedBy": "Production Lead"
