@@ -97,6 +97,46 @@ def run_scenario(base):
     assert_status(base, "PUT", url + "/operations", operations)
     assert_status(base, "POST", url + "/bom/approve", {"approvedBy": "Materials Lead"})
     assert_status(base, "POST", url + "/operations/approve", {"approvedBy": "IE Lead"})
+
+    # A release requires a separate approved engineering line capacity plan.
+    line = assert_status(base, "POST", "/api/lines", {
+        "code": "A01", "name": "Sewing A01", "factoryCode": "MY-PHUOC",
+        "maximumOperators": 20, "shiftMinutes": 480, "plannedEfficiencyPercent": 85
+    }, 201)
+    assert_status(base, "PUT", f"/api/lines/{line['id']}/machines", [
+        {"machineType": "Overlock", "availableCount": 5},
+        {"machineType": "Coverstitch", "availableCount": 5}
+    ])
+
+    # Infeasible machine/staff plan must not receive IE approval.
+    constrained = assert_status(base, "POST", "/api/lines", {
+        "code": "A02", "name": "Limited A02", "factoryCode": "MY-PHUOC",
+        "maximumOperators": 1, "shiftMinutes": 480, "plannedEfficiencyPercent": 85
+    }, 201)
+    assert_status(base, "PUT", f"/api/lines/{constrained['id']}/machines", [
+        {"machineType": "Overlock", "availableCount": 1},
+        {"machineType": "Coverstitch", "availableCount": 0}
+    ])
+    bad_plan = assert_status(base, "POST", url + "/line-plans", {
+        "productionLineId": constrained["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert not bad_plan["calculation"]["laborFeasible"]
+    assert not bad_plan["calculation"]["machineFeasible"]
+    assert_status(base, "POST", f"/api/line-plans/{bad_plan['plan']['id']}/approve",
+        {"approvedBy": "IE Lead"}, 409)
+
+    preview = assert_status(base, "POST", url + "/line-plans/preview", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    })
+    assert preview["calculation"]["canMeetTarget"]
+    plan = assert_status(base, "POST", url + "/line-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert plan["calculation"]["laborFeasible"] and plan["calculation"]["machineFeasible"]
+    assert_status(base, "POST", f"/api/line-plans/{plan['plan']['id']}/approve",
+        {"approvedBy": "IE Lead"})
+    print("✓ engineering line balance blocks insufficient staffing/machines")
+
     cost = assert_status(base, "POST", url + "/costs", {
         "minuteRate": 0.08, "overheadPerPiece": 0.5, "targetMarginPercent": 20
     }, 201)
@@ -127,6 +167,7 @@ def run_scenario(base):
     assert not readiness["ready"]
     assert any("IE routing/SMV" in b for b in readiness["blockers"])
     assert any("Approved costing" in b for b in readiness["blockers"])
+    assert any("line balance" in b.lower() for b in readiness["blockers"])
     assert_status(base, "POST", url + "/release", {
         "lineCode": "A01", "plannedStartDate": "2027-01-15",
         "approvedBy": "Production Lead"
@@ -134,6 +175,11 @@ def run_scenario(base):
     print("✓ changed routing invalidates earlier readiness and blocks release")
 
     assert_status(base, "POST", url + "/operations/approve", {"approvedBy": "IE Lead"})
+    fresh_plan = assert_status(base, "POST", url + "/line-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert_status(base, "POST", f"/api/line-plans/{fresh_plan['plan']['id']}/approve",
+        {"approvedBy": "IE Lead"})
     cost2 = assert_status(base, "POST", url + "/costs", {
         "minuteRate": 0.08, "overheadPerPiece": 0.5, "targetMarginPercent": 20
     }, 201)
@@ -148,6 +194,26 @@ def run_scenario(base):
             "verified": True, "verifiedBy": "PP Team", "notes": "Rechecked after revision"
         })
     assert assert_status(base, "GET", url + "/readiness")["ready"]
+
+    # Changing machine availability invalidates an approved plan by line revision.
+    assert_status(base, "PUT", f"/api/lines/{line['id']}/machines", [
+        {"machineType": "Overlock", "availableCount": 6},
+        {"machineType": "Coverstitch", "availableCount": 5}
+    ])
+    stale = assert_status(base, "GET", url + "/readiness")
+    assert not stale["ready"]
+    assert any("line balance" in x.lower() for x in stale["blockers"])
+    assert_status(base, "POST", url + "/release", {
+        "lineCode": "A01", "plannedStartDate": "2027-01-15",
+        "approvedBy": "Production Lead"
+    }, 409)
+    replanned = assert_status(base, "POST", url + "/line-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert_status(base, "POST", f"/api/line-plans/{replanned['plan']['id']}/approve",
+        {"approvedBy": "IE Lead"})
+    assert assert_status(base, "GET", url + "/readiness")["ready"]
+    print("✓ new machine configuration invalidates historical line approvals")
 
     release = assert_status(base, "POST", url + "/release", {
         "lineCode": "A01", "plannedStartDate": "2027-01-15",
