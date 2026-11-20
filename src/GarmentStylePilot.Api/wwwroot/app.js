@@ -1,6 +1,7 @@
 // GarmentStylePilot operational MVP (browser-only UI; permissions are enforced server-side).
 const state = { styles: [], stats: null, detail: null, readiness: null, codes: [], lines: [], plans: [], standards: [],
   workers: [], workstationPlans: [], workstationPreview: null, wsSkillLevel: 2,
+  materialReviews: [], schedules: [], handover: null, plannedOrderQuantity: 1000,
   selectedId: null, selectedLineId: null, tab: "overview", query: "",
   planTargetQty: 100, linePreview: null, expandedPlan: null };
 const $ = (id) => document.getElementById(id);
@@ -66,14 +67,22 @@ async function openStyle(id, updateList = true) {
   try {
     const currentLine = state.lines.find(x=>x.id===state.selectedLineId) || state.lines[0];
     if (currentLine && !state.selectedLineId) state.selectedLineId = currentLine.id;
-    const [detail, readiness, plans, workstationPlans, workers] = await Promise.all([
+    const [detail, readiness, plans, workstationPlans, workers, materialReviews, schedules] = await Promise.all([
       api("/api/styles/" + id), api("/api/styles/" + id + "/readiness"),
       api("/api/styles/" + id + "/line-plans"),
       api("/api/styles/" + id + "/workstation-plans"),
-      currentLine ? api("/api/lines/" + currentLine.id + "/operators") : Promise.resolve([])
+      currentLine ? api("/api/lines/" + currentLine.id + "/operators") : Promise.resolve([]),
+      api("/api/styles/" + id + "/material-reviews"),
+      api("/api/styles/" + id + "/schedules")
     ]);
     state.detail = detail; state.readiness = readiness; state.plans = plans;
     state.workstationPlans = workstationPlans; state.workers = workers;
+    state.materialReviews=materialReviews; state.schedules=schedules;
+    state.handover = null;
+    if (detail.release?.id) {
+      try { state.handover=await api("/api/releases/"+detail.release.id+"/handover"); }
+      catch (error) { console.warn("Handover not found for legacy release:",error.message); }
+    }
     renderDetail();
     if (updateList) renderStyles();
   } catch (error) {
@@ -116,7 +125,8 @@ function renderDetail() {
   const tabs = [
     ["overview", "Tổng quan"], ["sample", "Sample"], ["bom", "BOM"],
     ["ie", "IE · GST/SMV"], ["line", "Line Planning"],
-    ["workstations", "Workstations"], ["cost", "Costing & Quote"], ["readiness", "Line Readiness"]
+    ["workstations", "Workstations"], ["cost", "Costing & Quote"],
+    ["handover", "PPC Handover"], ["readiness", "Line Readiness"]
   ];
   $("detailPanel").innerHTML =
     "<div class='detail-head'><div><span class='eyebrow'>STYLE / " + h(s.customer) +
@@ -139,6 +149,7 @@ function renderTab() {
     case "line": return lineTab();
     case "workstations": return workstationTab();
     case "cost": return costTab();
+    case "handover": return handoverTab();
     case "readiness": return readinessTab();
     default: return overviewTab();
   }
@@ -175,7 +186,14 @@ function overviewTab() {
     ["05", "Workstations", stationApproved, "Qualified operators & grouped workstations"],
     ["06", "Costing", !!currentCost, "Approved cost sheet"],
     ["07", "Quotation", !!accepted, "Customer-accepted quote"],
-    ["08", "Line Readiness", state.readiness.ready || s.status==="Released", "8 production checkpoints"]
+    ["08", "Material Coverage", state.materialReviews.some(({review})=>
+        review.status==="Confirmed" && review.fullyCovered && review.bomRevision===s.bomRevision),
+        "Material quantities for full order"],
+    ["09", "PPC Schedule", state.schedules.some(x=>x.status==="Confirmed" &&
+        x.bomRevision===s.bomRevision && x.routingRevision===s.routingRevision &&
+        state.lines.some(l=>l.id===x.productionLineId && l.capacityRevision===x.lineCapacityRevision)),
+        "Approved line/date and order quantity"],
+    ["10", "Line Readiness", state.readiness.ready || s.status==="Released", "8 production checkpoints"]
   ];
   return "<h4 class='work-title'>Trạng thái mã hàng</h4>" +
     "<p class='work-desc'>Một mã hàng chỉ được bàn giao lên chuyền khi toàn bộ phê duyệt và điều kiện sản xuất đáp ứng yêu cầu.</p>" +
