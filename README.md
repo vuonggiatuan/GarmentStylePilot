@@ -13,7 +13,7 @@ dotnet restore src/GarmentStylePilot.Api/GarmentStylePilot.Api.csproj
 dotnet run --project src/GarmentStylePilot.Api --launch-profile http
 ```
 
-Open http://localhost:5090 for the initial dashboard, or http://localhost:5090/openapi/v1.json for the OpenAPI contract.
+Open http://localhost:5090 for the operational development workspace, or http://localhost:5090/openapi/v1.json for the OpenAPI contract.
 
 By default the database is SQLite (created automatically). To use SQL Server, set `Database__Provider=SqlServer` and `ConnectionStrings__SqlServer` with a valid connection string. **The prototype uses EnsureCreated and does not apply EF migrations**. For real deployment, introduce migrations and protect/backup business data.
 
@@ -51,6 +51,22 @@ Suggested quote price = total cost / (1 - target gross margin%).
 
 All costs are interpreted in the style's declared currency. The MVP does **not** yet calculate graded size consumption, landed cost, FX, fabric width/yield, taxes, subcontracting or real-time inventory. SMV is engineering-entered and must be approved; model-predicted SMV is **not** an IE-approved SMV.
 
+## AI prediction vs. IE-approved SMV
+
+Upload a forecast through `POST /api/styles/{id}/smv-estimates`. The payload contains model version, operation count, predicted SMV, 80% bounds, confidence and view consistency. AI estimates are **informational only**: they do not alter operation routing, approved SMV, costing or production readiness. IE must explicitly maintain `/operations` and approve the current revision.
+
+When BOM or IE routing changes, all verified production readiness checks are reset and require explicit re-verification. Approved cost sheets and customer quotes from older revisions cannot pass the gate.
+
+## Developer verification
+
+```bash
+dotnet build src/GarmentStylePilot.Api -c Release
+node --check src/GarmentStylePilot.Api/wwwroot/app.js
+python3 tests/smoke_api.py
+```
+
+GitHub Actions runs all three commands. The Python smoke test starts an isolated local API and temporary SQLite database; it verifies AI/IE separation, sample/BOM/IE/cost/quote, revision invalidation and production release. On existing demo SQLite databases, adding new fields/tables to an `EnsureCreated` schema requires recreating the **disposable demo database** first. Never delete a production database; introduce EF migrations before upgrade.
+
 ## Production gate
 
 Release blocks missing approved sample, incomplete BOM, unapproved latest BOM/routing revision, invalid operations, missing current approved costing, missing accepted quote or failed readiness checks. A release records the selected approved costing/quote and line. Released styles become read-only in these endpoints.
@@ -61,11 +77,11 @@ Release blocks missing approved sample, incomplete BOM, unapproved latest BOM/ro
 - `Application`: deterministic cost calculator and production gate.
 - `Data`: EF Core persistence (SQLite or SQL Server).
 - `Features`: minimal API route handlers.
-- `wwwroot`: basic dashboard; operational forms are not yet implemented.
+- `wwwroot`: operational workspace for style, samples, BOM, IE, AI SMV estimates, costing, quote and release.
 
 ## Security and production limitations
 
-**Prototype, not production-ready**. API key may be supplied as `GSP_API_KEY` and is mandatory when `ASPNETCORE_ENVIRONMENT=Production`. Replace it with SSO/OIDC, role-based authorizations, immutable approval audit, unique authenticated identities and tenant/factory boundaries. Business approvals currently use user-supplied strings, not verified accounts. Add optimistic concurrency, release locking, versioned costing snapshots, migrations, functional tests, error-handling middleware, ERP/MES integration and robust transactional concurrency before production use. The dashboard is read-only except for style creation.
+**Prototype, not production-ready**. API key may be supplied as `GSP_API_KEY` and is mandatory when `ASPNETCORE_ENVIRONMENT=Production`. Replace it with SSO/OIDC, role-based authorizations, immutable approval audit, unique authenticated identities and tenant/factory boundaries. Business approvals currently use user-supplied strings, not verified accounts. Add optimistic concurrency, release locking, versioned costing snapshots, migrations, functional tests, error-handling middleware, ERP/MES integration and robust transactional concurrency before production use. **The dashboard now includes operational forms** (still a prototype, not a secured production application).
 
 ## Roadmap
 
