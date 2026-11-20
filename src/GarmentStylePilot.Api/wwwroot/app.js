@@ -104,9 +104,9 @@ function renderSummary() {
   ).join("");
 }
 function pill(status) {
-  const css = status === "Released" || status === "Approved" || status === "Accepted" ? "good" :
+  const css = status === "Released" || status === "Approved" || status === "Accepted" || status === "Confirmed" ? "good" :
     status === "InDevelopment" || status === "Proposed" ? "blue" : "warning";
-  const names = { Released: "Production Released", InDevelopment: "Đang phát triển", Approved: "Đã duyệt", Accepted: "Đã chấp nhận", Draft: "Nháp", Proposed: "Đề xuất" };
+  const names = { Released: "Production Released", InDevelopment: "Đang phát triển", Approved: "Đã duyệt", Accepted: "Đã chấp nhận", Confirmed: "PPC Confirmed", Draft: "Nháp", Proposed: "Đề xuất" };
   return "<span class='pill " + css + "'>" + h(names[status] || status) + "</span>";
 }
 function renderStyles() {
@@ -559,6 +559,102 @@ function costTab() {
   (q.status==="Accepted"?"Đã chốt":"<button class='button tiny secondary' data-action='accept-quote' data-id='"+h(q.id)+"' "+dis+">Khách hàng chấp nhận</button>")+
   "</td></tr>").join("")+"</tbody></table></div>":"<p>Chưa có báo giá.</p>")+"</div>";
 }
+
+function handoverTab() {
+  const d=state.detail,s=d.style,released=s.status==="Released",disable=released?"disabled":"";
+  const reviewEntries=state.materialReviews, schedules=state.schedules;
+  const lastConfirmed=reviewEntries.find(({review})=>review.status==="Confirmed" &&
+    review.fullyCovered && review.bomRevision===s.bomRevision);
+  const last=reviewEntries[0];
+  const suggestedOrder=lastConfirmed?.review.orderQuantity||state.plannedOrderQuantity;
+  const materials=new Map();
+  for(const line of d.bom) {
+    const code=line.materialCode.trim().toUpperCase(),unit=line.unit.trim().toUpperCase();
+    const k=code+"|"+unit;
+    const prev=materials.get(k)||{materialCode:code,unit,required:0};
+    prev.required+=Number(line.consumption)*(1+Number(line.wastagePercent)/100)*suggestedOrder;
+    materials.set(k,prev);
+  }
+  const rows=[...materials.values()];
+  const usablePlans=state.workstationPlans.filter(({plan})=>{
+    const line=state.lines.find(x=>x.id===plan.productionLineId);
+    return line&&line.isActive&&line.capacityRevision===plan.lineCapacityRevision &&
+      plan.routingRevision===s.routingRevision&&plan.status==="Approved"&&
+      plan.laborFeasible&&plan.machineFeasible&&plan.skillFeasible&&
+      plan.assignedOperators===plan.requiredOperators &&
+      state.plans.some(({plan:base})=>base.productionLineId===plan.productionLineId &&
+        base.lineCapacityRevision===line.capacityRevision &&
+        base.routingRevision===s.routingRevision&&
+        base.targetDailyQuantity===plan.targetDailyQuantity&&
+        base.status==="Approved"&&base.laborFeasible&&base.machineFeasible);
+  });
+  const exportData=state.handover;
+  return "<h4 class='work-title'>Production Handover · PPC / Material / Schedule</h4>"+
+    "<p class='work-desc'>Tính nhu cầu theo BOM và số lượng đơn hàng, ghi nhận xác nhận PPC, khóa lịch dự kiến trước khi Release. Mọi dữ liệu hiện tại được nhập thủ công; KHÔNG phải kiểm tra tồn kho ERP hoặc xác nhận APS tự động.</p>"+
+    "<div class='alert warning'><strong>Manual PPC Attestation</strong> — số tồn có sẵn và lịch lên chuyền là số liệu người dùng cung cấp. API chưa đọc ERP/WMS hay APS, và không gửi lệnh sản xuất tới MES.</div>"+
+    "<div class='section-card'><h4>1. Material Coverage / NPL</h4>"+
+    "<form id='materialReviewForm'><div class='two-col'><label class='field'>Số lượng đơn hàng (pcs)<input type='number' name='orderQuantity' min='1' max='1000000' value='"+h(suggestedOrder)+"' required></label>"+
+    "<label class='field'>Mã chứng từ / nguồn PPC<input name='sourceReference' placeholder='PPC-STOCK-2027-001' required></label></div>"+
+    (rows.length ? "<div class='table-wrap' style='margin-top:12px'><table><thead><tr><th>Mã NPL</th><th>ĐVT</th><th>Required (tham khảo)</th><th>Available (PPC nhập)</th></tr></thead><tbody>"+
+      rows.map(x=>"<tr><td>"+h(x.materialCode)+"</td><td>"+h(x.unit)+"</td><td>"+
+      fmt(Math.ceil(x.required*10000)/10000,4)+"</td><td><input name='availableQuantity' type='number' step='any' min='0' max='1000000000' value='0' required data-material-code='"+
+      h(x.materialCode)+"' data-material-unit='"+h(x.unit)+"'></td></tr>").join("")+"</tbody></table></div>"+
+      "<div class='flex' style='margin-top:12px'><button class='button primary' "+disable+">Tính & lưu kiểm tra vật tư</button><span class='hint'>Bảng Required sẽ được backend tính lại khi lưu.</span></div>"+
+      "</form>":"<div class='alert warning'>Mã hàng chưa có BOM để tính nhu cầu NPL.</div></form>")+
+    "<div class='rule'></div><h4>Lịch sử kiểm tra vật tư ("+reviewEntries.length+")</h4>"+
+    (reviewEntries.length ? "<div class='table-wrap'><table><thead><tr><th>Reference</th><th>Order Qty</th><th>BOM</th><th>Coverage</th><th>Trạng thái</th><th></th></tr></thead><tbody>"+
+      reviewEntries.map(({review,items})=>"<tr><td>"+h(review.sourceReference)+"</td><td>"+h(review.orderQuantity)+
+        "</td><td>R"+h(review.bomRevision)+"</td><td>"+
+        (review.fullyCovered?"<span class='pill good'>✓ Đủ theo nhập liệu</span>":
+        "<span class='pill danger'>Thiếu "+h(items.filter(x=>Number(x.shortageQuantity)>0).length)+" NPL</span>")+
+        "</td><td>"+pill(review.status)+(review.bomRevision===s.bomRevision?"":" <span class='pill warning'>Stale</span>")+
+        "</td><td>"+(review.status==="Confirmed"?"<span class='data-muted'>"+h(review.confirmedBy)+"</span>":
+          "<button class='button tiny secondary' data-action='confirm-material' data-id='"+h(review.id)+"' "+
+          (!review.fullyCovered||review.bomRevision!==s.bomRevision||released?"disabled":"")+">PPC duyệt</button>")+
+        "</td></tr>").join("")+"</tbody></table></div>":"<p>Chưa có bảng tính NPL.</p>")+"</div>"+
+    "<div class='section-card'><h4>2. PPC Planned Line & Schedule</h4>"+
+    "<p>Phải có Workstation Plan đã IE duyệt và Material Coverage được PPC xác nhận cho cùng số lượng đơn hàng.</p>"+
+    "<form id='scheduleForm'><div class='two-col'><label class='field'>Workstation plan / chuyền<select name='workstationPlanId' required>"+
+      (usablePlans.length?usablePlans.map(({plan})=>{
+        const l=state.lines.find(x=>x.id===plan.productionLineId);
+        return "<option value='"+h(plan.id)+"'>"+h(l?.factoryCode)+" / "+h(l?.code)+
+          " · "+h(plan.targetDailyQuantity)+" pcs/day</option>";
+      }).join(""):"<option value=''>Chưa có plan được duyệt</option>")+
+      "</select></label>"+
+      "<label class='field'>Số lượng đơn hàng<input name='orderQuantity' type='number' min='1' max='1000000' required value='"+h(suggestedOrder)+"'></label>"+
+      "<label class='field'>Ngày bắt đầu dự kiến<input name='plannedStartDate' type='date' required></label>"+
+      "<label class='field'>PPC Planning Reference<input name='sourceReference' placeholder='PPC-PLAN-2027-001' required></label></div>"+
+      "<div class='flex' style='margin-top:14px'><button class='button primary' "+
+        (!usablePlans.length||released?"disabled":"")+">Lưu lịch PPC (Draft)</button>"+
+      "<span class='hint'>Cần PPC xác nhận sau khi lưu.</span></div></form>"+
+      "<div class='rule'></div><h4>Schedule Confirmations ("+schedules.length+")</h4>"+
+      (schedules.length?"<div class='table-wrap'><table><thead><tr><th>PPC Reference</th><th>Chuyền</th><th>Ngày</th><th>Qty / Day</th><th>Trạng thái</th><th></th></tr></thead><tbody>"+
+        schedules.map(x=>{
+          const l=state.lines.find(v=>v.id===x.productionLineId);
+          const current=!!l&&l.isActive&&l.capacityRevision===x.lineCapacityRevision &&
+            x.routingRevision===s.routingRevision&&x.bomRevision===s.bomRevision;
+          return "<tr><td>"+h(x.sourceReference)+"</td><td>"+h(l?.code||"Unknown")+"</td><td>"+
+            h(x.plannedStartDate)+"</td><td>"+h(x.orderQuantity)+" / "+h(x.targetDailyQuantity)+
+            "</td><td>"+pill(x.status)+(current?"":" <span class='pill warning'>Stale</span>")+
+            "</td><td>"+(x.status==="Confirmed"?"<span class='data-muted'>"+h(x.confirmedBy)+"</span>":
+            "<button class='button tiny secondary' data-action='confirm-schedule' data-id='"+h(x.id)+"' "+
+            (!current||released?"disabled":"")+">PPC duyệt</button>")+"</td></tr>";
+        }).join("")+"</tbody></table></div>":"<p>Chưa có lịch PPC nào được lưu.</p>")+"</div>"+
+    "<div class='section-card'><h4>3. Release Handover Package</h4>"+
+      (exportData?"<div class='banner'><strong>ReadyForExport — đã đóng gói tại thời điểm Release</strong>"+
+        "<p>Outbox "+h(exportData.outboxId)+" · Schema v"+h(exportData.schemaVersion)+
+        " · chưa gửi tới ERP, APS hoặc MES.</p></div>"+
+        "<div class='flex'><button class='button primary' data-action='download-handover'>"+
+        "↓ Tải JSON bàn giao</button>"+
+        "<span class='hint'>Snapshot bất biến, loại bỏ thông tin mã nhân viên trên chuyền.</span></div>"+
+        "<pre style='margin-top:12px'>"+h(JSON.stringify(exportData.payload,null,2).slice(0,2500))+
+        (JSON.stringify(exportData.payload).length>2500?"…":"")+"</pre>"+
+        "<p>Không thay thế cho việc ERP/MES xác nhận đã nhận dữ liệu. Export chưa được tự động phân phối.</p>":
+      (released?"<div class='alert warning'>Không tìm thấy export outbox cho bản Release cũ.</div>":
+      "<div class='alert warning'>Package sẽ được tạo đồng thời khi Production Release được phê duyệt sau các kiểm tra bắt buộc.</div>"))+
+    "</div>";
+}
+
 function readinessTab() {
   const d=state.detail, s=d.style, ready=state.readiness.ready, released=s.status==="Released", dis=active()?"":"disabled";
   const validLines=state.lines.filter(line => line.isActive && state.workstationPlans.some(({plan})=>
