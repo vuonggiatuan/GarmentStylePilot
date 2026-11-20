@@ -146,6 +146,46 @@ def run_scenario(base):
         {"machineType": "Coverstitch", "availableCount": 5}
     ])
 
+    # Phase 4: operator skill matrix. One multi-skilled person must not
+    # be counted twice when two separate machine-type workstations need staff.
+    op1 = assert_status(base, "POST", f"/api/lines/{line['id']}/operators", {
+        "employeeCode": "OP-001", "displayName": "Cross-trained Operator",
+        "skills": [{"machineType": "Overlock", "level": 4},
+                   {"machineType": "Coverstitch", "level": 3}]
+    }, 201)
+    assert_status(base, "POST", f"/api/lines/{line['id']}/operators", {
+        "employeeCode": "OP-001", "displayName": "Duplicate",
+        "skills": [{"machineType": "Overlock", "level": 4}]
+    }, 409)
+    preview_one = assert_status(base, "POST", url + "/workstation-plans/preview", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    })
+    result_one = preview_one["calculation"]
+    assert result_one["requiredOperators"] == 2
+    assert result_one["assignedOperators"] == 1
+    assert not result_one["skillFeasible"]
+    assert not result_one["canMeetTarget"]
+    no_skill = assert_status(base, "POST", url + "/workstation-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert_status(base, "POST", f"/api/workstation-plans/{no_skill['plan']['id']}/approve",
+                  {"approvedBy": "IE Lead"}, 409)
+    op2 = assert_status(base, "POST", f"/api/lines/{line['id']}/operators", {
+        "employeeCode": "OP-002", "displayName": "Coverstitch Operator",
+        "skills": [{"machineType": "Coverstitch", "level": 3}]
+    }, 201)
+    listed = assert_status(base, "GET", f"/api/lines/{line['id']}/operators")
+    assert len(listed) == 2
+    enough_skill = assert_status(base, "POST", url + "/workstation-plans/preview", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    })
+    assert enough_skill["calculation"]["canMeetTarget"]
+    assert enough_skill["calculation"]["assignedOperators"] == 2
+    codes = [e for station in enough_skill["calculation"]["stations"]
+             for e in station["assignedEmployeeCodes"]]
+    assert len(codes) == len(set(codes)) == 2
+    print("✓ multi-skilled employees are never double-counted")
+
     # Infeasible machine/staff plan must not receive IE approval.
     constrained = assert_status(base, "POST", "/api/lines", {
         "code": "A02", "name": "Limited A02", "factoryCode": "MY-PHUOC",
@@ -173,7 +213,14 @@ def run_scenario(base):
     assert plan["calculation"]["laborFeasible"] and plan["calculation"]["machineFeasible"]
     assert_status(base, "POST", f"/api/line-plans/{plan['plan']['id']}/approve",
         {"approvedBy": "IE Lead"})
-    print("✓ engineering line balance blocks insufficient staffing/machines")
+    ws_plan = assert_status(base, "POST", url + "/workstation-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert ws_plan["calculation"]["canMeetTarget"]
+    assert_status(base, "POST", f"/api/workstation-plans/{ws_plan['plan']['id']}/approve",
+                  {"approvedBy": "IE Lead"})
+    assert len(assert_status(base, "GET", url + "/workstation-plans")) == 2
+    print("✓ engineering line + workstation plans require qualified operators and machines")
 
     cost = assert_status(base, "POST", url + "/costs", {
         "minuteRate": 0.08, "overheadPerPiece": 0.5, "targetMarginPercent": 20
@@ -206,6 +253,7 @@ def run_scenario(base):
     assert any("IE routing/SMV" in b for b in readiness["blockers"])
     assert any("Approved costing" in b for b in readiness["blockers"])
     assert any("line balance" in b.lower() for b in readiness["blockers"])
+    assert any("workstation" in b.lower() for b in readiness["blockers"])
     assert_status(base, "POST", url + "/release", {
         "lineCode": "A01", "plannedStartDate": "2027-01-15",
         "approvedBy": "Production Lead"
@@ -218,6 +266,11 @@ def run_scenario(base):
     }, 201)
     assert_status(base, "POST", f"/api/line-plans/{fresh_plan['plan']['id']}/approve",
         {"approvedBy": "IE Lead"})
+    fresh_ws = assert_status(base, "POST", url + "/workstation-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert_status(base, "POST", f"/api/workstation-plans/{fresh_ws['plan']['id']}/approve",
+                  {"approvedBy": "IE Lead"})
     cost2 = assert_status(base, "POST", url + "/costs", {
         "minuteRate": 0.08, "overheadPerPiece": 0.5, "targetMarginPercent": 20
     }, 201)
@@ -250,14 +303,49 @@ def run_scenario(base):
     }, 201)
     assert_status(base, "POST", f"/api/line-plans/{replanned['plan']['id']}/approve",
         {"approvedBy": "IE Lead"})
+    renewed_ws = assert_status(base, "POST", url + "/workstation-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert_status(base, "POST", f"/api/workstation-plans/{renewed_ws['plan']['id']}/approve",
+                  {"approvedBy": "IE Lead"})
     assert assert_status(base, "GET", url + "/readiness")["ready"]
     print("✓ new machine configuration invalidates historical line approvals")
+
+    # Updating operator skills also invalidates both capacity and workstation plans.
+    assert_status(base, "PUT", f"/api/operators/{op2['id']}", {
+        "displayName": "Coverstitch Operator", "isActive": True,
+        "skills": [{"machineType": "Coverstitch", "level": 1}]
+    })
+    changed = assert_status(base, "GET", url + "/readiness")
+    assert not changed["ready"]
+    assert any("workstation" in x.lower() for x in changed["blockers"])
+    skill_shortage = assert_status(base, "POST", url + "/workstation-plans/preview", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    })
+    assert not skill_shortage["calculation"]["skillFeasible"]
+    assert_status(base, "PUT", f"/api/operators/{op2['id']}", {
+        "displayName": "Coverstitch Operator", "isActive": True,
+        "skills": [{"machineType": "Coverstitch", "level": 4}]
+    })
+    current_base = assert_status(base, "POST", url + "/line-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert_status(base, "POST", f"/api/line-plans/{current_base['plan']['id']}/approve",
+                  {"approvedBy": "IE Lead"})
+    current_ws = assert_status(base, "POST", url + "/workstation-plans", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    }, 201)
+    assert_status(base, "POST", f"/api/workstation-plans/{current_ws['plan']['id']}/approve",
+                  {"approvedBy": "IE Lead"})
+    assert assert_status(base, "GET", url + "/readiness")["ready"]
+    print("✓ skill changes invalidate old plans and require reapproval")
 
     release = assert_status(base, "POST", url + "/release", {
         "lineCode": "A01", "plannedStartDate": "2027-01-15",
         "approvedBy": "Production Lead"
     }, 201)
     assert release["quoteId"] == quote2["id"]
+    assert release["workstationPlanId"] == current_ws["plan"]["id"]
     assert_status(base, "POST", url + "/release", {
         "lineCode": "A02", "plannedStartDate": "2027-01-16",
         "approvedBy": "Production Lead"
