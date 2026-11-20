@@ -94,7 +94,45 @@ def run_scenario(base):
         {"sequenceNo": 2, "name": "Attach neck rib", "machineType": "Coverstitch", "smvMinutes": 1.24}
     ]
     assert_status(base, "PUT", url + "/bom", bom)
-    assert_status(base, "PUT", url + "/operations", operations)
+
+    # Reusable IE operation reference catalog, imported into a new style routing revision.
+    std1 = assert_status(base, "POST", "/api/operation-standards", {
+        "code": "GST-101", "componentName": "Body",
+        "operationName": "Join shoulder", "machineType": "Overlock",
+        "methodCode": "IE-STD", "referenceSmvMinutes": 0.62
+    }, 201)
+    std2 = assert_status(base, "POST", "/api/operation-standards", {
+        "code": "GST-102", "componentName": "Neck",
+        "operationName": "Attach neck rib", "machineType": "Coverstitch",
+        "methodCode": "IE-STD", "referenceSmvMinutes": 1.24
+    }, 201)
+    assert_status(base, "POST", "/api/operation-standards", {
+        "code": "GST-101", "componentName": "Body",
+        "operationName": "Join shoulder", "machineType": "Overlock",
+        "methodCode": "IE-STD", "referenceSmvMinutes": 0.62
+    }, 409)
+    catalog = assert_status(base, "GET", "/api/operation-standards")
+    assert len(catalog) == 2
+    imported = assert_status(base, "POST", url + "/operations/from-library", [
+        {"sequenceNo": 1, "operationStandardId": std1["id"]},
+        {"sequenceNo": 2, "operationStandardId": std2["id"]}
+    ])
+    assert imported["requiresIeApproval"]
+    snapshot = assert_status(base, "GET", url)
+    assert snapshot["operations"][0]["operationStandardId"] == std1["id"]
+    assert snapshot["operations"][0]["standardRevision"] == 1
+
+    # Updating a shared standard must NOT retroactively change an existing style's SMV.
+    updated = assert_status(base, "PUT", f"/api/operation-standards/{std1['id']}", {
+        "componentName": "Body", "operationName": "Join shoulder",
+        "machineType": "Overlock", "methodCode": "IE-STD",
+        "referenceSmvMinutes": 0.88, "isActive": True
+    })
+    assert updated["revision"] == 2
+    snapshot = assert_status(base, "GET", url)
+    assert float(snapshot["operations"][0]["smvMinutes"]) == 0.62
+    assert snapshot["operations"][0]["standardRevision"] == 1
+    print("✓ IE operation library keeps revisioned, non-retroactive routing snapshots")
     assert_status(base, "POST", url + "/bom/approve", {"approvedBy": "Materials Lead"})
     assert_status(base, "POST", url + "/operations/approve", {"approvedBy": "IE Lead"})
 
