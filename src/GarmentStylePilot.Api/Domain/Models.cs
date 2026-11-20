@@ -193,6 +193,64 @@ public sealed class LineBalanceAssignment
     public int EstimatedDailyCapacity { get; set; }
 }
 
+// Actual operator skill matrix. A qualified operator can be allocated to only one
+// workstation slot per simulated shift; multi-skilled people are not double counted.
+public sealed class LineOperator
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProductionLineId { get; set; }
+    public string EmployeeCode { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class OperatorSkill
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid LineOperatorId { get; set; }
+    public string MachineType { get; set; } = "";
+    public int Level { get; set; } // 1-5, 2 is the default qualified threshold.
+}
+
+// A saved heuristic grouping: distinct from the Phase 3 dedicated-operation plan.
+// Versions are snapshotted, and production release requires current approved grouping.
+public sealed class WorkstationPlan
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid StyleId { get; set; }
+    public Guid ProductionLineId { get; set; }
+    public int RoutingRevision { get; set; }
+    public int LineCapacityRevision { get; set; }
+    public int TargetDailyQuantity { get; set; }
+    public int MinimumSkillLevel { get; set; } = 2;
+    public int RequiredOperators { get; set; }
+    public int AssignedOperators { get; set; }
+    public int AvailableOperators { get; set; }
+    public int EstimatedDailyCapacity { get; set; }
+    public decimal TaktMinutes { get; set; }
+    public bool LaborFeasible { get; set; }
+    public bool MachineFeasible { get; set; }
+    public bool SkillFeasible { get; set; }
+    public string ConstraintSummary { get; set; } = "";
+    public LineBalanceStatus Status { get; set; } = LineBalanceStatus.Draft;
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+}
+
+public sealed class WorkstationGroup
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid WorkstationPlanId { get; set; }
+    public int StationNumber { get; set; }
+    public string MachineType { get; set; } = "";
+    public decimal CombinedSmvMinutes { get; set; }
+    public int RequiredOperators { get; set; }
+    public int EstimatedDailyCapacity { get; set; }
+    public string AssignedEmployeeCodes { get; set; } = ""; // comma-separated snapshot codes
+    public string OperationSequences { get; set; } = ""; // comma-separated sequences
+}
+
 public sealed class ProductionRelease
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -203,4 +261,5 @@ public sealed class ProductionRelease
     public DateTime ApprovedAtUtc { get; set; } = DateTime.UtcNow;
     public Guid CostSheetId { get; set; }
     public Guid QuoteId { get; set; }
+    public Guid? WorkstationPlanId { get; set; }
 }

@@ -24,7 +24,7 @@ public static class ProductionGate
         IReadOnlyCollection<SewingOperation> operations, IReadOnlyCollection<CostSheet> costs,
         IReadOnlyCollection<Quote> quotes, IReadOnlyCollection<ReadinessCheck> checks,
         IReadOnlyCollection<LineBalancePlan> plans, IReadOnlyCollection<ProductionLine> lines,
-        string? requiredLineCode = null)
+        IReadOnlyCollection<WorkstationPlan> workstations, string? requiredLineCode = null)
     {
         var blockers = new List<string>();
         if (style.Status == StyleStatus.Released)
@@ -60,6 +60,21 @@ public static class ProductionGate
             blockers.Add(requiredLineCode is null
                 ? "Approved feasible line balance plan for current routing and line capacity required."
                 : "Approved feasible line balance plan required for target line " + requiredLineCode + ".");
+
+        var approvedWorkstations = workstations.Any(p =>
+            p.Status == LineBalanceStatus.Approved &&
+            p.RoutingRevision == style.RoutingRevision &&
+            p.LaborFeasible && p.MachineFeasible && p.SkillFeasible &&
+            p.AssignedOperators == p.RequiredOperators &&
+            lines.Any(line => line.Id == p.ProductionLineId &&
+                line.CapacityRevision == p.LineCapacityRevision && line.IsActive &&
+                (requiredLineCode is null ||
+                 string.Equals(line.Code, requiredLineCode, StringComparison.OrdinalIgnoreCase))) &&
+            approvedPlans.Any(baseline => baseline.ProductionLineId == p.ProductionLineId));
+        if (!approvedWorkstations)
+            blockers.Add(requiredLineCode is null
+                ? "Approved qualified workstation balance for current IE routing and line capacity required."
+                : "Approved qualified workstation balance required for target line " + requiredLineCode + ".");
 
         foreach (var code in ReadinessCodes.Required)
             if (!checks.Any(x => x.Code == code && x.Verified))

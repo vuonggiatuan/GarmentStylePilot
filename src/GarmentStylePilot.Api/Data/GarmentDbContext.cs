@@ -19,6 +19,10 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
     public DbSet<LineMachineCapacity> LineMachineCapacities => Set<LineMachineCapacity>();
     public DbSet<LineBalancePlan> LineBalancePlans => Set<LineBalancePlan>();
     public DbSet<LineBalanceAssignment> LineBalanceAssignments => Set<LineBalanceAssignment>();
+    public DbSet<LineOperator> LineOperators => Set<LineOperator>();
+    public DbSet<OperatorSkill> OperatorSkills => Set<OperatorSkill>();
+    public DbSet<WorkstationPlan> WorkstationPlans => Set<WorkstationPlan>();
+    public DbSet<WorkstationGroup> WorkstationGroups => Set<WorkstationGroup>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,6 +35,12 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
         modelBuilder.Entity<LineMachineCapacity>().HasIndex(x => new { x.ProductionLineId, x.MachineType }).IsUnique();
         modelBuilder.Entity<LineBalanceAssignment>().HasIndex(x => new { x.LineBalancePlanId, x.SequenceNo }).IsUnique();
         modelBuilder.Entity<LineBalancePlan>().Property(x => x.Status).HasConversion<string>();
+        modelBuilder.Entity<LineOperator>().HasIndex(x => x.EmployeeCode).IsUnique();
+        modelBuilder.Entity<OperatorSkill>().HasIndex(x => new { x.LineOperatorId, x.MachineType }).IsUnique();
+        modelBuilder.Entity<WorkstationGroup>().HasIndex(x => new { x.WorkstationPlanId, x.StationNumber }).IsUnique();
+        modelBuilder.Entity<WorkstationPlan>().Property(x => x.Status).HasConversion<string>();
+        modelBuilder.Entity<WorkstationPlan>().Property(x => x.TaktMinutes).HasPrecision(18, 6);
+        modelBuilder.Entity<WorkstationGroup>().Property(x => x.CombinedSmvMinutes).HasPrecision(18, 4);
         modelBuilder.Entity<ProductionLine>().Property(x => x.PlannedEfficiencyPercent).HasPrecision(9, 4);
         modelBuilder.Entity<LineBalancePlan>().Property(x => x.TotalSmvMinutes).HasPrecision(18, 4);
         modelBuilder.Entity<LineBalancePlan>().Property(x => x.TaktMinutes).HasPrecision(18, 6);
@@ -79,5 +89,17 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
             .HasForeignKey(x => x.StyleId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<LineBalanceAssignment>().HasOne<LineBalancePlan>().WithMany()
             .HasForeignKey(x => x.LineBalancePlanId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<LineOperator>().HasOne<ProductionLine>().WithMany()
+            .HasForeignKey(x => x.ProductionLineId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<OperatorSkill>().HasOne<LineOperator>().WithMany()
+            .HasForeignKey(x => x.LineOperatorId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WorkstationPlan>().HasOne<Style>().WithMany()
+            .HasForeignKey(x => x.StyleId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<WorkstationPlan>().HasOne<ProductionLine>().WithMany()
+            .HasForeignKey(x => x.ProductionLineId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<WorkstationGroup>().HasOne<WorkstationPlan>().WithMany()
+            .HasForeignKey(x => x.WorkstationPlanId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ProductionRelease>().HasOne<WorkstationPlan>().WithMany()
+            .HasForeignKey(x => x.WorkstationPlanId).OnDelete(DeleteBehavior.Restrict);
     }
 }

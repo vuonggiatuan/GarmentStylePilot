@@ -76,6 +76,8 @@ public static class GarmentEndpoints
                 checks = await db.ReadinessChecks.Where(x => x.StyleId == id).ToListAsync(),
                 linePlans = await db.LineBalancePlans.Where(x => x.StyleId == id)
                     .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
+                workstationPlans = await db.WorkstationPlans.Where(x => x.StyleId == id)
+                    .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
                 release = await db.ProductionReleases.SingleOrDefaultAsync(x => x.StyleId == id)
             });
         });
@@ -312,7 +314,7 @@ public static class GarmentEndpoints
             if (snapshot is null) return Results.NotFound();
             var blockers = ProductionGate.Evaluate(snapshot.Style, snapshot.Samples,
                 snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks,
-                snapshot.LinePlans, snapshot.Lines);
+                snapshot.LinePlans, snapshot.Lines, snapshot.WorkstationPlans);
             return Results.Ok(new { ready = blockers.Count == 0, blockers });
         });
 
@@ -327,7 +329,7 @@ public static class GarmentEndpoints
             if (snapshot is null) return Results.NotFound();
             var blockers = ProductionGate.Evaluate(snapshot.Style, snapshot.Samples,
                 snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks,
-                snapshot.LinePlans, snapshot.Lines, input.LineCode);
+                snapshot.LinePlans, snapshot.Lines, snapshot.WorkstationPlans, input.LineCode);
             if (blockers.Count > 0) return Results.Conflict(new { ready = false, blockers });
 
             var cost = snapshot.Costs.Where(x => x.IsApproved &&
@@ -347,11 +349,23 @@ public static class GarmentEndpoints
                 cost = snapshot.Costs.Single(x => x.Id == quote.CostSheetId);
             }
 
+            var selectedLine = snapshot.Lines.Single(x => x.IsActive &&
+                string.Equals(x.Code, input.LineCode.Trim(), StringComparison.OrdinalIgnoreCase));
+            var approvedWorkstation = snapshot.WorkstationPlans
+                .Where(x => x.ProductionLineId == selectedLine.Id &&
+                    x.RoutingRevision == snapshot.Style.RoutingRevision &&
+                    x.LineCapacityRevision == selectedLine.CapacityRevision &&
+                    x.Status == LineBalanceStatus.Approved &&
+                    x.LaborFeasible && x.MachineFeasible && x.SkillFeasible &&
+                    x.AssignedOperators == x.RequiredOperators)
+                .OrderByDescending(x => x.CreatedAtUtc).First();
+
             var release = new ProductionRelease
             {
                 StyleId = id, LineCode = input.LineCode.Trim(),
                 PlannedStartDate = input.PlannedStartDate, ApprovedBy = input.ApprovedBy.Trim(),
-                CostSheetId = cost.Id, QuoteId = quote.Id
+                CostSheetId = cost.Id, QuoteId = quote.Id,
+                WorkstationPlanId = approvedWorkstation.Id
             };
             snapshot.Style.Status = StyleStatus.Released;
             db.ProductionReleases.Add(release);
@@ -380,7 +394,8 @@ public static class GarmentEndpoints
 
     private sealed record Snapshot(Style Style, List<Sample> Samples, List<BomLine> Bom,
         List<SewingOperation> Operations, List<CostSheet> Costs, List<Quote> Quotes,
-        List<ReadinessCheck> Checks, List<LineBalancePlan> LinePlans, List<ProductionLine> Lines);
+        List<ReadinessCheck> Checks, List<LineBalancePlan> LinePlans, List<ProductionLine> Lines,
+        List<WorkstationPlan> WorkstationPlans);
 
     private static async Task<Snapshot?> Load(GarmentDbContext db, Guid id)
     {
@@ -394,6 +409,7 @@ public static class GarmentEndpoints
             await db.Quotes.Where(x => x.StyleId == id).ToListAsync(),
             await db.ReadinessChecks.Where(x => x.StyleId == id).ToListAsync(),
             await db.LineBalancePlans.Where(x => x.StyleId == id).ToListAsync(),
-            await db.ProductionLines.ToListAsync());
+            await db.ProductionLines.ToListAsync(),
+            await db.WorkstationPlans.Where(x => x.StyleId == id).ToListAsync());
     }
 }

@@ -60,6 +60,7 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 app.MapGarmentEndpoints();
 app.MapLinePlanningEndpoints();
 app.MapOperationStandardEndpoints();
+app.MapWorkstationEndpoints();
 app.Run();
 
 public partial class Program;
