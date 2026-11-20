@@ -1,5 +1,5 @@
 // GarmentStylePilot operational MVP (browser-only UI; permissions are enforced server-side).
-const state = { styles: [], stats: null, detail: null, readiness: null, codes: [], lines: [], plans: [],
+const state = { styles: [], stats: null, detail: null, readiness: null, codes: [], lines: [], plans: [], standards: [],
   selectedId: null, selectedLineId: null, tab: "overview", query: "",
   planTargetQty: 100, linePreview: null, expandedPlan: null };
 const $ = (id) => document.getElementById(id);
@@ -50,10 +50,12 @@ async function api(path, options = {}) {
   return data;
 }
 async function reload() {
-  const [stats, styles, codes, lines] = await Promise.all([
-    api("/api/dashboard"), api("/api/styles"), api("/api/readiness-codes"), api("/api/lines")
+  const [stats, styles, codes, lines, standards] = await Promise.all([
+    api("/api/dashboard"), api("/api/styles"), api("/api/readiness-codes"), api("/api/lines"),
+    api("/api/operation-standards")
   ]);
-  state.stats = stats; state.styles = styles; state.codes = codes; state.lines = lines;
+  state.stats = stats; state.styles = styles; state.codes = codes;
+  state.lines = lines; state.standards = standards;
   renderSummary(); renderStyles();
   if (state.selectedId) await openStyle(state.selectedId, false);
   $("lastUpdated").textContent = "Đồng bộ lúc " + new Date().toLocaleTimeString("vi-VN");
@@ -261,6 +263,27 @@ function ieTab() {
   "<label class='field'>View consistency %<input type='number' step='any' min='0' max='100' name='viewConsistencyPercent'></label>" +
   "<label class='field'>Confidence<input name='confidence' placeholder='High / Medium / Low'></label></div>" +
   "<div class='flex' style='margin-top:14px'><button class='button primary' " + dis + ">Lưu AI Estimate</button></div></form></div>" +
+  "<div class='section-card'><h4>IE Operation Standards · Thư viện công đoạn</h4>" +
+  "<p>Mỗi công đoạn chuẩn là SMV tham chiếu có revision. Import chỉ sao chép dữ liệu vào routing, IE phải duyệt lại.</p>" +
+  "<form id='standardForm'><div class='two-col'>" +
+  "<label class='field'>Mã công đoạn chuẩn<input name='code' placeholder='GST-101' required></label>" +
+  "<label class='field'>Bộ phận / Component<input name='componentName' placeholder='Body / Sleeve' required></label>" +
+  "<label class='field'>Tên công đoạn<input name='operationName' placeholder='Join shoulder' required></label>" +
+  "<label class='field'>Loại máy<input name='machineType' placeholder='OVERLOCK' required></label>" +
+  "<label class='field'>Mã phương pháp<input name='methodCode' value='IE-STD'></label>" +
+  "<label class='field'>Reference SMV (min)<input name='referenceSmvMinutes' type='number' min='0.0001' max='1000' step='any' required></label>" +
+  "</div><div class='flex' style='margin-top:12px'><button class='button secondary'>+ Thêm công đoạn chuẩn</button></div></form>" +
+  "<div class='rule'></div>" +
+  (state.standards.length ? "<form id='importStandardsForm'><div class='table-wrap'><table><thead><tr><th>Chọn</th><th>Mã / Revision</th><th>Component</th><th>Operation</th><th>Machine</th><th>SMV</th></tr></thead><tbody>" +
+    state.standards.map(x=>"<tr><td><input type='checkbox' name='standardId' value='"+h(x.id)+"' "+(x.isActive?"":"disabled")+"></td>"+
+    "<td>"+h(x.code)+" · R"+h(x.revision)+(x.isActive?"":" [Inactive]")+"</td>"+
+    "<td>"+h(x.componentName)+"</td><td>"+h(x.operationName)+"</td><td>"+h(x.machineType)+
+    "</td><td>"+fmt(x.referenceSmvMinutes)+"</td></tr>").join("")+
+    "</tbody></table></div><div class='flex' style='margin-top:12px'>"+
+    "<span class='hint'>Chọn các công đoạn theo thứ tự mã để thay thế routing hiện tại.</span>"+
+    "<button class='button primary push' "+(active()?"":"disabled")+">Import vào mã hàng</button></div></form>" :
+    "<p>Thư viện chưa có công đoạn. Tạo công đoạn chuẩn ở form bên trên.</p>")+
+  "</div>" +
   "<div class='section-card'><h4>Quy trình công đoạn chính thức — IE</h4><form id='operationsForm'>" +
   "<div class='table-wrap'><table id='operationTable'><thead><tr><th>Seq</th><th>Tên công đoạn</th><th>Thiết bị</th><th>SMV (min)</th><th></th></tr></thead><tbody>" +
   (d.operations.length?d.operations.map((x,i)=>opRow(x,i+1)).join(""):opRow()) +
@@ -571,6 +594,24 @@ async function handleSubmit(form) {
     });
     state.linePreview=null;renderDetail();
     notify("Đã lưu kế hoạch chuyền mới; cần IE phê duyệt nếu đạt yêu cầu.");return;
+  }
+  if(name==="standardForm"){
+    const input={
+      code:fields.code, componentName:fields.componentName, operationName:fields.operationName,
+      machineType:fields.machineType, methodCode:fields.methodCode,
+      referenceSmvMinutes:Number(fields.referenceSmvMinutes)
+    };
+    await api("/api/operation-standards",{method:"POST",body:JSON.stringify(input)});
+    await reload();
+    notify("Đã thêm IE Operation Standard. Chưa phải IE approval của mã hàng.");return;
+  }
+  if(name==="importStandardsForm"){
+    const chosen=[...form.querySelectorAll("input[name=standardId]:checked")].map(x=>x.value);
+    if(!chosen.length)throw new Error("Chọn ít nhất một công đoạn trong thư viện.");
+    if(!window.confirm("Import sẽ thay thế routing hiện tại, tạo revision mới và hủy trạng thái readiness trước đó. Tiếp tục?"))return;
+    await mutation("/api/styles/"+id+"/operations/from-library","POST",
+      chosen.map((operationStandardId,i)=>({sequenceNo:i+1,operationStandardId})));
+    notify("Đã import thư viện vào routing. IE phải kiểm tra & phê duyệt lại.");return;
   }
   if(name==="sampleForm"){
     await mutation("/api/styles/"+id+"/samples","POST",fields);notify("Đã thêm mẫu.");return;
