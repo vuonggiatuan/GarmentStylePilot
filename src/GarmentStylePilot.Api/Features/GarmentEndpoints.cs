@@ -357,15 +357,8 @@ public static class GarmentEndpoints
 
             var selectedLine = snapshot.Lines.Single(x => x.IsActive &&
                 string.Equals(x.Code, input.LineCode.Trim(), StringComparison.OrdinalIgnoreCase));
-            var approvedWorkstation = snapshot.WorkstationPlans
-                .Where(x => x.ProductionLineId == selectedLine.Id &&
-                    x.RoutingRevision == snapshot.Style.RoutingRevision &&
-                    x.LineCapacityRevision == selectedLine.CapacityRevision &&
-                    x.Status == LineBalanceStatus.Approved &&
-                    x.LaborFeasible && x.MachineFeasible && x.SkillFeasible &&
-                    x.AssignedOperators == x.RequiredOperators)
-                .OrderByDescending(x => x.CreatedAtUtc).First();
-
+            // Bind release to the exact approved workstation plan referenced
+            // by the selected confirmed schedule. Do not select a different later plan.
             var matchingSchedule = snapshot.Schedules.Where(s =>
                 s.Status == HandoverReviewStatus.Confirmed &&
                 s.ProductionLineId == selectedLine.Id &&
@@ -373,8 +366,26 @@ public static class GarmentEndpoints
                 s.BomRevision == snapshot.Style.BomRevision &&
                 s.RoutingRevision == snapshot.Style.RoutingRevision &&
                 s.LineCapacityRevision == selectedLine.CapacityRevision &&
-                s.WorkstationPlanId == approvedWorkstation.Id)
+                snapshot.WorkstationPlans.Any(w => w.Id == s.WorkstationPlanId &&
+                    w.ProductionLineId == selectedLine.Id &&
+                    w.TargetDailyQuantity == s.TargetDailyQuantity &&
+                    w.RoutingRevision == snapshot.Style.RoutingRevision &&
+                    w.LineCapacityRevision == selectedLine.CapacityRevision &&
+                    w.Status == LineBalanceStatus.Approved &&
+                    w.LaborFeasible && w.MachineFeasible && w.SkillFeasible &&
+                    w.AssignedOperators == w.RequiredOperators) &&
+                snapshot.LinePlans.Any(p => p.ProductionLineId == selectedLine.Id &&
+                    p.TargetDailyQuantity == s.TargetDailyQuantity &&
+                    p.RoutingRevision == snapshot.Style.RoutingRevision &&
+                    p.LineCapacityRevision == selectedLine.CapacityRevision &&
+                    p.Status == LineBalanceStatus.Approved &&
+                    p.LaborFeasible && p.MachineFeasible) &&
+                snapshot.MaterialReviews.Any(m => m.Status == HandoverReviewStatus.Confirmed &&
+                    m.BomRevision == snapshot.Style.BomRevision &&
+                    m.OrderQuantity == s.OrderQuantity && m.FullyCovered))
                 .OrderByDescending(s => s.ConfirmedAtUtc).First();
+            var approvedWorkstation = snapshot.WorkstationPlans.Single(w =>
+                w.Id == matchingSchedule.WorkstationPlanId);
 
             var matchingMaterial = snapshot.MaterialReviews.Where(m =>
                 m.Status == HandoverReviewStatus.Confirmed &&
