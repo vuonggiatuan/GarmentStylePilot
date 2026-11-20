@@ -74,6 +74,8 @@ public static class GarmentEndpoints
                 costs = await db.CostSheets.Where(x => x.StyleId == id).ToListAsync(),
                 quotes = await db.Quotes.Where(x => x.StyleId == id).ToListAsync(),
                 checks = await db.ReadinessChecks.Where(x => x.StyleId == id).ToListAsync(),
+                linePlans = await db.LineBalancePlans.Where(x => x.StyleId == id)
+                    .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
                 release = await db.ProductionReleases.SingleOrDefaultAsync(x => x.StyleId == id)
             });
         });
@@ -309,7 +311,8 @@ public static class GarmentEndpoints
             var snapshot = await Load(db, id);
             if (snapshot is null) return Results.NotFound();
             var blockers = ProductionGate.Evaluate(snapshot.Style, snapshot.Samples,
-                snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks);
+                snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks,
+                snapshot.LinePlans, snapshot.Lines);
             return Results.Ok(new { ready = blockers.Count == 0, blockers });
         });
 
@@ -323,7 +326,8 @@ public static class GarmentEndpoints
             var snapshot = await Load(db, id);
             if (snapshot is null) return Results.NotFound();
             var blockers = ProductionGate.Evaluate(snapshot.Style, snapshot.Samples,
-                snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks);
+                snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks,
+                snapshot.LinePlans, snapshot.Lines, input.LineCode);
             if (blockers.Count > 0) return Results.Conflict(new { ready = false, blockers });
 
             var cost = snapshot.Costs.Where(x => x.IsApproved &&
@@ -376,7 +380,7 @@ public static class GarmentEndpoints
 
     private sealed record Snapshot(Style Style, List<Sample> Samples, List<BomLine> Bom,
         List<SewingOperation> Operations, List<CostSheet> Costs, List<Quote> Quotes,
-        List<ReadinessCheck> Checks);
+        List<ReadinessCheck> Checks, List<LineBalancePlan> LinePlans, List<ProductionLine> Lines);
 
     private static async Task<Snapshot?> Load(GarmentDbContext db, Guid id)
     {
@@ -388,6 +392,8 @@ public static class GarmentEndpoints
             await db.SewingOperations.Where(x => x.StyleId == id).ToListAsync(),
             await db.CostSheets.Where(x => x.StyleId == id).ToListAsync(),
             await db.Quotes.Where(x => x.StyleId == id).ToListAsync(),
-            await db.ReadinessChecks.Where(x => x.StyleId == id).ToListAsync());
+            await db.ReadinessChecks.Where(x => x.StyleId == id).ToListAsync(),
+            await db.LineBalancePlans.Where(x => x.StyleId == id).ToListAsync(),
+            await db.ProductionLines.ToListAsync());
     }
 }

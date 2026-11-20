@@ -22,7 +22,9 @@ public static class ProductionGate
     public static IReadOnlyList<string> Evaluate(
         Style style, IReadOnlyCollection<Sample> samples, IReadOnlyCollection<BomLine> bom,
         IReadOnlyCollection<SewingOperation> operations, IReadOnlyCollection<CostSheet> costs,
-        IReadOnlyCollection<Quote> quotes, IReadOnlyCollection<ReadinessCheck> checks)
+        IReadOnlyCollection<Quote> quotes, IReadOnlyCollection<ReadinessCheck> checks,
+        IReadOnlyCollection<LineBalancePlan> plans, IReadOnlyCollection<ProductionLine> lines,
+        string? requiredLineCode = null)
     {
         var blockers = new List<string>();
         if (style.Status == StyleStatus.Released)
@@ -46,6 +48,18 @@ public static class ProductionGate
         if (!quotes.Any(x => x.Status == QuoteStatus.Accepted
             && currentCosts.Any(c => c.Id == x.CostSheetId)))
             blockers.Add("Customer-accepted quote linked to current approved costing required.");
+
+        var approvedPlans = plans.Where(p => p.Status == LineBalanceStatus.Approved &&
+            p.RoutingRevision == style.RoutingRevision &&
+            p.LaborFeasible && p.MachineFeasible &&
+            lines.Any(line => line.Id == p.ProductionLineId &&
+                line.CapacityRevision == p.LineCapacityRevision && line.IsActive &&
+                (requiredLineCode is null ||
+                 string.Equals(line.Code, requiredLineCode, StringComparison.OrdinalIgnoreCase)))).ToArray();
+        if (approvedPlans.Length == 0)
+            blockers.Add(requiredLineCode is null
+                ? "Approved feasible line balance plan for current routing and line capacity required."
+                : "Approved feasible line balance plan required for target line " + requiredLineCode + ".");
 
         foreach (var code in ReadinessCodes.Required)
             if (!checks.Any(x => x.Code == code && x.Verified))

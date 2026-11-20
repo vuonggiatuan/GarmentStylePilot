@@ -114,6 +114,67 @@ public sealed class ReadinessCheck
     public DateTime? VerifiedAtUtc { get; set; }
 }
 
+public enum LineBalanceStatus { Draft, Approved }
+
+// An operational line is a specific production capacity, not just a string code.
+public sealed class ProductionLine
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Code { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string FactoryCode { get; set; } = "";
+    public int MaximumOperators { get; set; }
+    public int ShiftMinutes { get; set; } = 480;
+    public decimal PlannedEfficiencyPercent { get; set; } = 85m;
+    public int CapacityRevision { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class LineMachineCapacity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProductionLineId { get; set; }
+    public string MachineType { get; set; } = "";
+    public int AvailableCount { get; set; }
+}
+
+// Historical calculation snapshot. Routing revision and line capacity revision must both match
+// before the plan may be used to release a style.
+public sealed class LineBalancePlan
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid StyleId { get; set; }
+    public Guid ProductionLineId { get; set; }
+    public int RoutingRevision { get; set; }
+    public int LineCapacityRevision { get; set; }
+    public int TargetDailyQuantity { get; set; }
+    public decimal TotalSmvMinutes { get; set; }
+    public decimal TaktMinutes { get; set; }
+    public decimal EffectiveMinutesPerOperator { get; set; }
+    public int RequiredOperators { get; set; }
+    public int AvailableOperators { get; set; }
+    public int EstimatedDailyCapacity { get; set; }
+    public bool LaborFeasible { get; set; }
+    public bool MachineFeasible { get; set; }
+    public string ConstraintSummary { get; set; } = "";
+    public LineBalanceStatus Status { get; set; } = LineBalanceStatus.Draft;
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+}
+
+public sealed class LineBalanceAssignment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid LineBalancePlanId { get; set; }
+    public int SequenceNo { get; set; }
+    public string OperationName { get; set; } = "";
+    public string MachineType { get; set; } = "";
+    public decimal SmvMinutes { get; set; }
+    public int RequiredOperators { get; set; }
+    public int EstimatedDailyCapacity { get; set; }
+}
+
 public sealed class ProductionRelease
 {
     public Guid Id { get; set; } = Guid.NewGuid();
