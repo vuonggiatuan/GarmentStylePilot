@@ -251,6 +251,69 @@ public sealed class WorkstationGroup
     public string OperationSequences { get; set; } = ""; // comma-separated sequences
 }
 
+// Phase 5: immutable planning snapshots. Confirmed records are PPC assertions,
+// NOT real-time ERP inventory or APS integration evidence.
+public enum HandoverReviewStatus { Draft, Confirmed }
+
+public sealed class MaterialCoverageReview
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid StyleId { get; set; }
+    public int BomRevision { get; set; }
+    public int OrderQuantity { get; set; }
+    public string SourceType { get; set; } = "MANUAL_PPC_ATTESTATION";
+    public string SourceReference { get; set; } = "";
+    public bool FullyCovered { get; set; }
+    public HandoverReviewStatus Status { get; set; } = HandoverReviewStatus.Draft;
+    public string? ConfirmedBy { get; set; }
+    public DateTime? ConfirmedAtUtc { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class MaterialCoverageItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ReviewId { get; set; }
+    public string MaterialCode { get; set; } = "";
+    public string Unit { get; set; } = "";
+    public decimal RequiredQuantity { get; set; }
+    public decimal AvailableQuantity { get; set; }
+    public decimal ShortageQuantity { get; set; }
+}
+
+public sealed class ProductionScheduleConfirmation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid StyleId { get; set; }
+    public Guid ProductionLineId { get; set; }
+    public Guid WorkstationPlanId { get; set; }
+    public int BomRevision { get; set; }
+    public int RoutingRevision { get; set; }
+    public int LineCapacityRevision { get; set; }
+    public int OrderQuantity { get; set; }
+    public int TargetDailyQuantity { get; set; }
+    public DateOnly PlannedStartDate { get; set; }
+    public string SourceType { get; set; } = "MANUAL_PPC_CONFIRMATION";
+    public string SourceReference { get; set; } = "";
+    public HandoverReviewStatus Status { get; set; } = HandoverReviewStatus.Draft;
+    public string? ConfirmedBy { get; set; }
+    public DateTime? ConfirmedAtUtc { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+// Transactional, persisted payload prepared for a future adapter.
+// There is NO network delivery to ERP, MES, APS in this MVP.
+public sealed class ProductionHandoverOutbox
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProductionReleaseId { get; set; }
+    public string EventType { get; set; } = "GarmentStyleProductionReleased";
+    public int SchemaVersion { get; set; } = 1;
+    public string Status { get; set; } = "ReadyForExport";
+    public string PayloadJson { get; set; } = "";
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
 public sealed class ProductionRelease
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -262,4 +325,6 @@ public sealed class ProductionRelease
     public Guid CostSheetId { get; set; }
     public Guid QuoteId { get; set; }
     public Guid? WorkstationPlanId { get; set; }
+    public Guid? MaterialCoverageReviewId { get; set; }
+    public Guid? ProductionScheduleConfirmationId { get; set; }
 }

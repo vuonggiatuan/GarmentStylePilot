@@ -24,7 +24,10 @@ public static class ProductionGate
         IReadOnlyCollection<SewingOperation> operations, IReadOnlyCollection<CostSheet> costs,
         IReadOnlyCollection<Quote> quotes, IReadOnlyCollection<ReadinessCheck> checks,
         IReadOnlyCollection<LineBalancePlan> plans, IReadOnlyCollection<ProductionLine> lines,
-        IReadOnlyCollection<WorkstationPlan> workstations, string? requiredLineCode = null)
+        IReadOnlyCollection<WorkstationPlan> workstations,
+        IReadOnlyCollection<MaterialCoverageReview> materialReviews,
+        IReadOnlyCollection<ProductionScheduleConfirmation> schedules,
+        string? requiredLineCode = null, DateOnly? requiredStartDate = null)
     {
         var blockers = new List<string>();
         if (style.Status == StyleStatus.Released)
@@ -76,6 +79,39 @@ public static class ProductionGate
             blockers.Add(requiredLineCode is null
                 ? "Approved qualified workstation balance for current IE routing and line capacity required."
                 : "Approved qualified workstation balance required for target line " + requiredLineCode + ".");
+
+        var coveredMaterials = materialReviews.Where(m =>
+            m.Status == HandoverReviewStatus.Confirmed &&
+            m.BomRevision == style.BomRevision &&
+            m.OrderQuantity > 0 && m.FullyCovered).ToArray();
+        if (coveredMaterials.Length == 0)
+            blockers.Add("Confirmed complete material coverage for current BOM and order quantity required.");
+
+        var confirmedSchedule = schedules.Any(s =>
+            s.Status == HandoverReviewStatus.Confirmed &&
+            s.BomRevision == style.BomRevision &&
+            s.RoutingRevision == style.RoutingRevision &&
+            s.OrderQuantity > 0 && s.TargetDailyQuantity > 0 &&
+            coveredMaterials.Any(m => m.OrderQuantity == s.OrderQuantity) &&
+            lines.Any(line => line.Id == s.ProductionLineId &&
+                line.IsActive && line.CapacityRevision == s.LineCapacityRevision &&
+                (requiredLineCode is null ||
+                    string.Equals(line.Code, requiredLineCode, StringComparison.OrdinalIgnoreCase))) &&
+            (requiredStartDate is null || s.PlannedStartDate == requiredStartDate.Value) &&
+            workstations.Any(w => w.Id == s.WorkstationPlanId &&
+                w.ProductionLineId == s.ProductionLineId &&
+                w.RoutingRevision == style.RoutingRevision &&
+                w.LineCapacityRevision == s.LineCapacityRevision &&
+                w.TargetDailyQuantity == s.TargetDailyQuantity &&
+                w.Status == LineBalanceStatus.Approved &&
+                w.LaborFeasible && w.MachineFeasible && w.SkillFeasible &&
+                w.AssignedOperators == w.RequiredOperators) &&
+            approvedPlans.Any(p => p.ProductionLineId == s.ProductionLineId &&
+                p.TargetDailyQuantity == s.TargetDailyQuantity));
+        if (!confirmedSchedule)
+            blockers.Add(requiredLineCode is null
+                ? "Confirmed PPC schedule with current approved line, workstation plan and material quantity required."
+                : "Confirmed PPC schedule for requested line, date and current approved plans required.");
 
         foreach (var code in ReadinessCodes.Required)
             if (!checks.Any(x => x.Code == code && x.Verified))

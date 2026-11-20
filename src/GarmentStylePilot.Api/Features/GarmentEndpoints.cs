@@ -78,6 +78,10 @@ public static class GarmentEndpoints
                     .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
                 workstationPlans = await db.WorkstationPlans.Where(x => x.StyleId == id)
                     .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
+                materialReviews = await db.MaterialCoverageReviews.Where(x => x.StyleId == id)
+                    .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
+                scheduleConfirmations = await db.ProductionScheduleConfirmations.Where(x => x.StyleId == id)
+                    .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
                 release = await db.ProductionReleases.SingleOrDefaultAsync(x => x.StyleId == id)
             });
         });
@@ -314,7 +318,8 @@ public static class GarmentEndpoints
             if (snapshot is null) return Results.NotFound();
             var blockers = ProductionGate.Evaluate(snapshot.Style, snapshot.Samples,
                 snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks,
-                snapshot.LinePlans, snapshot.Lines, snapshot.WorkstationPlans);
+                snapshot.LinePlans, snapshot.Lines, snapshot.WorkstationPlans,
+                snapshot.MaterialReviews, snapshot.Schedules);
             return Results.Ok(new { ready = blockers.Count == 0, blockers });
         });
 
@@ -329,7 +334,8 @@ public static class GarmentEndpoints
             if (snapshot is null) return Results.NotFound();
             var blockers = ProductionGate.Evaluate(snapshot.Style, snapshot.Samples,
                 snapshot.Bom, snapshot.Operations, snapshot.Costs, snapshot.Quotes, snapshot.Checks,
-                snapshot.LinePlans, snapshot.Lines, snapshot.WorkstationPlans, input.LineCode);
+                snapshot.LinePlans, snapshot.Lines, snapshot.WorkstationPlans,
+                snapshot.MaterialReviews, snapshot.Schedules, input.LineCode, input.PlannedStartDate);
             if (blockers.Count > 0) return Results.Conflict(new { ready = false, blockers });
 
             var cost = snapshot.Costs.Where(x => x.IsApproved &&
@@ -360,15 +366,46 @@ public static class GarmentEndpoints
                     x.AssignedOperators == x.RequiredOperators)
                 .OrderByDescending(x => x.CreatedAtUtc).First();
 
+            var matchingSchedule = snapshot.Schedules.Where(s =>
+                s.Status == HandoverReviewStatus.Confirmed &&
+                s.ProductionLineId == selectedLine.Id &&
+                s.PlannedStartDate == input.PlannedStartDate &&
+                s.BomRevision == snapshot.Style.BomRevision &&
+                s.RoutingRevision == snapshot.Style.RoutingRevision &&
+                s.LineCapacityRevision == selectedLine.CapacityRevision &&
+                s.WorkstationPlanId == approvedWorkstation.Id)
+                .OrderByDescending(s => s.ConfirmedAtUtc).First();
+
+            var matchingMaterial = snapshot.MaterialReviews.Where(m =>
+                m.Status == HandoverReviewStatus.Confirmed &&
+                m.BomRevision == snapshot.Style.BomRevision &&
+                m.OrderQuantity == matchingSchedule.OrderQuantity && m.FullyCovered)
+                .OrderByDescending(m => m.ConfirmedAtUtc).First();
+
+            var materialLines = await db.MaterialCoverageItems
+                .Where(x => x.ReviewId == matchingMaterial.Id)
+                .OrderBy(x => x.MaterialCode).ThenBy(x => x.Unit).ToListAsync();
+            var stationGroups = await db.WorkstationGroups
+                .Where(x => x.WorkstationPlanId == approvedWorkstation.Id)
+                .OrderBy(x => x.StationNumber).ToListAsync();
+
             var release = new ProductionRelease
             {
                 StyleId = id, LineCode = input.LineCode.Trim(),
                 PlannedStartDate = input.PlannedStartDate, ApprovedBy = input.ApprovedBy.Trim(),
                 CostSheetId = cost.Id, QuoteId = quote.Id,
-                WorkstationPlanId = approvedWorkstation.Id
+                WorkstationPlanId = approvedWorkstation.Id,
+                MaterialCoverageReviewId = matchingMaterial.Id,
+                ProductionScheduleConfirmationId = matchingSchedule.Id
             };
+
+            var outbox = HandoverPayloadBuilder.Build(
+                snapshot.Style, release, snapshot.Bom, snapshot.Operations,
+                selectedLine, stationGroups, cost, quote, matchingMaterial,
+                materialLines, matchingSchedule);
             snapshot.Style.Status = StyleStatus.Released;
             db.ProductionReleases.Add(release);
+            db.ProductionHandoverOutboxes.Add(outbox);
             await db.SaveChangesAsync();
             await transaction.CommitAsync();
             return Results.Created($"/api/styles/{id}", release);
@@ -395,7 +432,9 @@ public static class GarmentEndpoints
     private sealed record Snapshot(Style Style, List<Sample> Samples, List<BomLine> Bom,
         List<SewingOperation> Operations, List<CostSheet> Costs, List<Quote> Quotes,
         List<ReadinessCheck> Checks, List<LineBalancePlan> LinePlans, List<ProductionLine> Lines,
-        List<WorkstationPlan> WorkstationPlans);
+        List<WorkstationPlan> WorkstationPlans,
+        List<MaterialCoverageReview> MaterialReviews,
+        List<ProductionScheduleConfirmation> Schedules);
 
     private static async Task<Snapshot?> Load(GarmentDbContext db, Guid id)
     {
@@ -410,6 +449,8 @@ public static class GarmentEndpoints
             await db.ReadinessChecks.Where(x => x.StyleId == id).ToListAsync(),
             await db.LineBalancePlans.Where(x => x.StyleId == id).ToListAsync(),
             await db.ProductionLines.ToListAsync(),
-            await db.WorkstationPlans.Where(x => x.StyleId == id).ToListAsync());
+            await db.WorkstationPlans.Where(x => x.StyleId == id).ToListAsync(),
+            await db.MaterialCoverageReviews.Where(x => x.StyleId == id).ToListAsync(),
+            await db.ProductionScheduleConfirmations.Where(x => x.StyleId == id).ToListAsync());
     }
 }

@@ -61,6 +61,7 @@ app.MapGarmentEndpoints();
 app.MapLinePlanningEndpoints();
 app.MapOperationStandardEndpoints();
 app.MapWorkstationEndpoints();
+app.MapProductionHandoverEndpoints();
 app.Run();
 
 public partial class Program;

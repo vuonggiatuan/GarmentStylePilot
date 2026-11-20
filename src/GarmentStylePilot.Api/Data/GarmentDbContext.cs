@@ -23,6 +23,10 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
     public DbSet<OperatorSkill> OperatorSkills => Set<OperatorSkill>();
     public DbSet<WorkstationPlan> WorkstationPlans => Set<WorkstationPlan>();
     public DbSet<WorkstationGroup> WorkstationGroups => Set<WorkstationGroup>();
+    public DbSet<MaterialCoverageReview> MaterialCoverageReviews => Set<MaterialCoverageReview>();
+    public DbSet<MaterialCoverageItem> MaterialCoverageItems => Set<MaterialCoverageItem>();
+    public DbSet<ProductionScheduleConfirmation> ProductionScheduleConfirmations => Set<ProductionScheduleConfirmation>();
+    public DbSet<ProductionHandoverOutbox> ProductionHandoverOutboxes => Set<ProductionHandoverOutbox>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +39,13 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
         modelBuilder.Entity<LineMachineCapacity>().HasIndex(x => new { x.ProductionLineId, x.MachineType }).IsUnique();
         modelBuilder.Entity<LineBalanceAssignment>().HasIndex(x => new { x.LineBalancePlanId, x.SequenceNo }).IsUnique();
         modelBuilder.Entity<LineBalancePlan>().Property(x => x.Status).HasConversion<string>();
+        modelBuilder.Entity<MaterialCoverageReview>().Property(x => x.Status).HasConversion<string>();
+        modelBuilder.Entity<ProductionScheduleConfirmation>().Property(x => x.Status).HasConversion<string>();
+        modelBuilder.Entity<MaterialCoverageItem>().HasIndex(x => new { x.ReviewId, x.MaterialCode, x.Unit }).IsUnique();
+        modelBuilder.Entity<ProductionHandoverOutbox>().HasIndex(x => x.ProductionReleaseId).IsUnique();
+        modelBuilder.Entity<MaterialCoverageItem>().Property(x => x.RequiredQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<MaterialCoverageItem>().Property(x => x.AvailableQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<MaterialCoverageItem>().Property(x => x.ShortageQuantity).HasPrecision(18, 4);
         modelBuilder.Entity<LineOperator>().HasIndex(x => x.EmployeeCode).IsUnique();
         modelBuilder.Entity<OperatorSkill>().HasIndex(x => new { x.LineOperatorId, x.MachineType }).IsUnique();
         modelBuilder.Entity<WorkstationGroup>().HasIndex(x => new { x.WorkstationPlanId, x.StationNumber }).IsUnique();
@@ -101,5 +112,21 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
             .HasForeignKey(x => x.WorkstationPlanId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ProductionRelease>().HasOne<WorkstationPlan>().WithMany()
             .HasForeignKey(x => x.WorkstationPlanId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MaterialCoverageReview>().HasOne<Style>().WithMany()
+            .HasForeignKey(x => x.StyleId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<MaterialCoverageItem>().HasOne<MaterialCoverageReview>().WithMany()
+            .HasForeignKey(x => x.ReviewId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ProductionScheduleConfirmation>().HasOne<Style>().WithMany()
+            .HasForeignKey(x => x.StyleId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProductionScheduleConfirmation>().HasOne<ProductionLine>().WithMany()
+            .HasForeignKey(x => x.ProductionLineId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProductionScheduleConfirmation>().HasOne<WorkstationPlan>().WithMany()
+            .HasForeignKey(x => x.WorkstationPlanId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProductionRelease>().HasOne<MaterialCoverageReview>().WithMany()
+            .HasForeignKey(x => x.MaterialCoverageReviewId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProductionRelease>().HasOne<ProductionScheduleConfirmation>().WithMany()
+            .HasForeignKey(x => x.ProductionScheduleConfirmationId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProductionHandoverOutbox>().HasOne<ProductionRelease>().WithMany()
+            .HasForeignKey(x => x.ProductionReleaseId).OnDelete(DeleteBehavior.Restrict);
     }
 }
