@@ -667,6 +667,21 @@ function readinessTab() {
       baseline.routingRevision===s.routingRevision &&
       baseline.targetDailyQuantity===plan.targetDailyQuantity &&
       baseline.status==="Approved" && baseline.laborFeasible && baseline.machineFeasible)));
+  const confirmedSchedules=state.schedules.filter(schedule=>
+    schedule.status==="Confirmed" && schedule.bomRevision===s.bomRevision &&
+    schedule.routingRevision===s.routingRevision &&
+    state.materialReviews.some(({review})=>review.status==="Confirmed" &&
+      review.fullyCovered && review.bomRevision===s.bomRevision &&
+      review.orderQuantity===schedule.orderQuantity));
+  const eligibleLines=validLines.filter(line=>confirmedSchedules.some(schedule=>
+    schedule.productionLineId===line.id &&
+    schedule.lineCapacityRevision===line.capacityRevision &&
+    state.workstationPlans.some(({plan})=>plan.id===schedule.workstationPlanId &&
+      plan.productionLineId===line.id && plan.status==="Approved" &&
+      plan.lineCapacityRevision===line.capacityRevision &&
+      plan.routingRevision===s.routingRevision &&
+      plan.targetDailyQuantity===schedule.targetDailyQuantity)));
+  const planned=confirmedSchedules.find(schedule=>eligibleLines.some(line=>line.id===schedule.productionLineId));
   const checkMap=new Map(d.checks.map(x=>[x.code,x]));
   return "<h4 class='work-title'>Production Readiness Gate</h4><p class='work-desc'>Kiểm tra 8 điều kiện tiền sản xuất trước khi phát hành mã hàng sang chuyền.</p>" +
   (released ?
@@ -689,11 +704,11 @@ function readinessTab() {
   "<div class='section-card' style='margin-top:17px'><h4>Production Release</h4>"+
   "<p>Phát hành chỉ khi tất cả dữ liệu được phê duyệt. Đây là bước bàn giao sang PPC/MES, chưa phải tự động tạo lệnh sản xuất.</p>"+
   "<form id='releaseForm' class='form-row'><label>Chuyền may<select name='lineCode' required>"+
-  (validLines.length ? validLines.map(line=>"<option value='"+h(line.code)+"'>"+h(line.code)+" · "+h(line.factoryCode)+"</option>").join("") :
-  "<option value=''>Chưa có line balance plan được duyệt</option>")+
+  (eligibleLines.length ? eligibleLines.map(line=>"<option value='"+h(line.code)+"'>"+h(line.code)+" · "+h(line.factoryCode)+"</option>").join("") :
+  "<option value=''>Chưa có PPC schedule hợp lệ</option>")+
   "</select></label>"+
-  "<label>Ngày dự kiến lên chuyền<input type='date' name='plannedStartDate' required></label>"+
-  "<button class='button primary' "+(!ready||released||!validLines.length?"disabled":"")+">✓ Release to Production</button></form>"+
+  "<label>Ngày dự kiến lên chuyền<input type='date' name='plannedStartDate' required value='"+h(planned?.plannedStartDate||"")+"'></label>"+
+  "<button class='button primary' "+(!ready||released||!eligibleLines.length?"disabled":"")+">✓ Release to Production</button></form>"+
   "<div class='hint' style='margin-top:12px'>MVP: checklist dùng xác nhận bằng tên nhập tay, chưa có workflow role-based hay tài liệu chứng cứ đính kèm.</div></div>";
 }
 function rowData(tr, keys, numerics=[]) {
@@ -742,6 +757,27 @@ async function handleAction(el) {
     state.planTargetQty=targetDailyQuantity;state.wsSkillLevel=minimumSkillLevel;
     state.workstationPreview={lineId:selected.id,result};
     renderDetail();notify("Đã mô phỏng workstation và skill matching.");return;
+  }
+  if(action==="confirm-material"){
+    await mutation("/api/material-reviews/"+el.dataset.id+"/confirm","POST",{confirmedBy:actor()});
+    notify("PPC đã xác nhận tình trạng NPL theo dữ liệu nhập tay.");return;
+  }
+  if(action==="confirm-schedule"){
+    await mutation("/api/schedules/"+el.dataset.id+"/confirm","POST",{confirmedBy:actor()});
+    notify("PPC đã xác nhận lịch lên chuyền (manual attestation).");return;
+  }
+  if(action==="download-handover"){
+    if(!state.handover)throw new Error("Chưa có JSON bàn giao.");
+    const payload=JSON.stringify(state.handover.payload,null,2);
+    const blob=new Blob([payload],{type:"application/json;charset=utf-8"});
+    const href=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=href;
+    const safeCode=String(state.detail.style.code||"style").replace(/[^A-Za-z0-9_-]/g,"_");
+    link.download=safeCode+"-production-handover.json";
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(href),5000);
+    notify("Đã tạo file JSON bàn giao để tải về. Chưa gửi tới ERP/MES.");return;
   }
   if(action==="approve-workstation"){
     await mutation("/api/workstation-plans/"+el.dataset.id+"/approve","POST",{
@@ -838,6 +874,36 @@ async function handleSubmit(form) {
     await reload();notify("Đã tạo mã hàng "+style.code+".");return;
   }
   if(!id)throw new Error("Chọn mã hàng trước khi thao tác.");
+  if(name==="materialReviewForm"){
+    const available=[...form.querySelectorAll("[name=availableQuantity]")].map(el=>({
+      materialCode:el.dataset.materialCode,unit:el.dataset.materialUnit,
+      availableQuantity:Number(el.value)
+    }));
+    if(!available.length)throw new Error("Chưa có BOM để kiểm tra vật tư.");
+    state.plannedOrderQuantity=Number(fields.orderQuantity);
+    const result=await mutation("/api/styles/"+id+"/material-reviews","POST",{
+      orderQuantity:state.plannedOrderQuantity,
+      sourceReference:fields.sourceReference,available
+    });
+    notify(result.review.fullyCovered?
+      "NPL đủ theo số liệu nhập. Cần PPC xác nhận.":"Có thiếu hụt NPL, không thể xác nhận đủ vật tư.");
+    return;
+  }
+  if(name==="scheduleForm"){
+    const option=state.workstationPlans.find(({plan})=>plan.id===fields.workstationPlanId);
+    if(!option)throw new Error("Chọn Workstation Plan được duyệt.");
+    const plan=option.plan;
+    await mutation("/api/styles/"+id+"/schedules","POST",{
+      productionLineId:plan.productionLineId,
+      workstationPlanId:plan.id,
+      orderQuantity:Number(fields.orderQuantity),
+      targetDailyQuantity:plan.targetDailyQuantity,
+      plannedStartDate:fields.plannedStartDate,
+      sourceReference:fields.sourceReference
+    });
+    notify("Đã tạo lịch PPC Draft. Cần PPC xác nhận sau khi đối chiếu vật tư.");
+    return;
+  }
   if(name==="operatorForm"){
     const selected=state.lines.find(x=>x.id===state.selectedLineId)||state.lines[0];
     if(!selected)throw new Error("Chưa có chuyền.");
@@ -951,7 +1017,9 @@ async function handleSubmit(form) {
     if(!window.confirm("Phát hành mã hàng này cho chuyền "+fields.lineCode+"? Không thể sửa sau khi phát hành."))return;
     await mutation("/api/styles/"+id+"/release","POST",{
       lineCode:fields.lineCode,plannedStartDate:fields.plannedStartDate,approvedBy:actor()
-    });notify("Production Release thành công.");return;
+    });
+    state.tab="handover";renderDetail();
+    notify("Đã Release. Gói bàn giao được lưu để xuất JSON; chưa gửi ERP/MES.");return;
   }
 }
 document.addEventListener("click", async(event)=>{
@@ -968,6 +1036,16 @@ document.addEventListener("submit",async(event)=>{
 });
 $("styleSearch").addEventListener("input",event=>{state.query=event.target.value;renderStyles();});
 document.addEventListener("change",event=>{
+  if(event.target?.name==="lineCode" && event.target?.closest("#releaseForm")){
+    const line=state.lines.find(x=>x.code===event.target.value);
+    const schedule=state.schedules.find(x=>x.status==="Confirmed" &&
+      x.productionLineId===line?.id &&
+      x.bomRevision===state.detail?.style.bomRevision &&
+      x.routingRevision===state.detail?.style.routingRevision &&
+      x.lineCapacityRevision===line?.capacityRevision);
+    const input=event.target.closest("#releaseForm").querySelector("[name=plannedStartDate]");
+    if(input&&schedule)input.value=schedule.plannedStartDate;
+  }
   if(event.target?.id==="lineSelector" || event.target?.id==="wsLineSelector"){
     state.selectedLineId=event.target.value;
     state.linePreview=null;state.workstationPreview=null;
