@@ -70,7 +70,8 @@ public static class ProductionGate
                 line.CapacityRevision == p.LineCapacityRevision && line.IsActive &&
                 (requiredLineCode is null ||
                  string.Equals(line.Code, requiredLineCode, StringComparison.OrdinalIgnoreCase))) &&
-            approvedPlans.Any(baseline => baseline.ProductionLineId == p.ProductionLineId));
+            approvedPlans.Any(baseline => baseline.ProductionLineId == p.ProductionLineId &&
+                baseline.TargetDailyQuantity == p.TargetDailyQuantity));
         if (!approvedWorkstations)
             blockers.Add(requiredLineCode is null
                 ? "Approved qualified workstation balance for current IE routing and line capacity required."
