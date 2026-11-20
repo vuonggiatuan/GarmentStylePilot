@@ -1,5 +1,6 @@
 // GarmentStylePilot operational MVP (browser-only UI; permissions are enforced server-side).
 const state = { styles: [], stats: null, detail: null, readiness: null, codes: [], lines: [], plans: [], standards: [],
+  workers: [], workstationPlans: [], workstationPreview: null, wsSkillLevel: 2,
   selectedId: null, selectedLineId: null, tab: "overview", query: "",
   planTargetQty: 100, linePreview: null, expandedPlan: null };
 const $ = (id) => document.getElementById(id);
@@ -63,11 +64,16 @@ async function reload() {
 async function openStyle(id, updateList = true) {
   state.selectedId = id;
   try {
-    const [detail, readiness, plans] = await Promise.all([
+    const currentLine = state.lines.find(x=>x.id===state.selectedLineId) || state.lines[0];
+    if (currentLine && !state.selectedLineId) state.selectedLineId = currentLine.id;
+    const [detail, readiness, plans, workstationPlans, workers] = await Promise.all([
       api("/api/styles/" + id), api("/api/styles/" + id + "/readiness"),
-      api("/api/styles/" + id + "/line-plans")
+      api("/api/styles/" + id + "/line-plans"),
+      api("/api/styles/" + id + "/workstation-plans"),
+      currentLine ? api("/api/lines/" + currentLine.id + "/operators") : Promise.resolve([])
     ]);
     state.detail = detail; state.readiness = readiness; state.plans = plans;
+    state.workstationPlans = workstationPlans; state.workers = workers;
     renderDetail();
     if (updateList) renderStyles();
   } catch (error) {
@@ -110,7 +116,7 @@ function renderDetail() {
   const tabs = [
     ["overview", "Tổng quan"], ["sample", "Sample"], ["bom", "BOM"],
     ["ie", "IE · GST/SMV"], ["line", "Line Planning"],
-    ["cost", "Costing & Quote"], ["readiness", "Line Readiness"]
+    ["workstations", "Workstations"], ["cost", "Costing & Quote"], ["readiness", "Line Readiness"]
   ];
   $("detailPanel").innerHTML =
     "<div class='detail-head'><div><span class='eyebrow'>STYLE / " + h(s.customer) +
@@ -131,6 +137,7 @@ function renderTab() {
     case "bom": return bomTab();
     case "ie": return ieTab();
     case "line": return lineTab();
+    case "workstations": return workstationTab();
     case "cost": return costTab();
     case "readiness": return readinessTab();
     default: return overviewTab();
@@ -148,14 +155,27 @@ function overviewTab() {
       plan.routingRevision===s.routingRevision && plan.status==="Approved" &&
       plan.laborFeasible && plan.machineFeasible;
   });
+  const stationApproved=state.workstationPlans.some(({plan})=>{
+    const line=state.lines.find(x=>x.id===plan.productionLineId);
+    return line && line.isActive && line.capacityRevision===plan.lineCapacityRevision &&
+      plan.routingRevision===s.routingRevision && plan.status==="Approved" &&
+      plan.laborFeasible && plan.machineFeasible && plan.skillFeasible &&
+      plan.assignedOperators===plan.requiredOperators &&
+      state.plans.some(({plan:baseline})=>baseline.productionLineId===line.id &&
+        baseline.targetDailyQuantity===plan.targetDailyQuantity &&
+        baseline.routingRevision===s.routingRevision &&
+        baseline.lineCapacityRevision===line.capacityRevision &&
+        baseline.status==="Approved" && baseline.laborFeasible && baseline.machineFeasible);
+  });
   const steps = [
     ["01", "Sample", d.samples.some(x=>x.status==="Approved"), "Fit / PP Sample approval"],
     ["02", "BOM", s.bomRevision>0 && s.bomRevision===s.approvedBomRevision, "Material consumption revision " + s.bomRevision],
     ["03", "IE Routing", s.routingRevision>0 && s.routingRevision===s.approvedRoutingRevision, "Official SMV " + fmt(official) + " min"],
     ["04", "Line Planning", balanced, "Feasible IE-approved line staffing and machine capacity"],
-    ["05", "Costing", !!currentCost, "Approved cost sheet"],
-    ["06", "Quotation", !!accepted, "Customer-accepted quote"],
-    ["07", "Line Readiness", state.readiness.ready || s.status==="Released", "8 production checkpoints"]
+    ["05", "Workstations", stationApproved, "Qualified operators & grouped workstations"],
+    ["06", "Costing", !!currentCost, "Approved cost sheet"],
+    ["07", "Quotation", !!accepted, "Customer-accepted quote"],
+    ["08", "Line Readiness", state.readiness.ready || s.status==="Released", "8 production checkpoints"]
   ];
   return "<h4 class='work-title'>Trạng thái mã hàng</h4>" +
     "<p class='work-desc'>Một mã hàng chỉ được bàn giao lên chuyền khi toàn bộ phê duyệt và điều kiện sản xuất đáp ứng yêu cầu.</p>" +
@@ -425,10 +445,16 @@ function costTab() {
 }
 function readinessTab() {
   const d=state.detail, s=d.style, ready=state.readiness.ready, released=s.status==="Released", dis=active()?"":"disabled";
-  const validLines=state.lines.filter(line => line.isActive && state.plans.some(({plan})=>
+  const validLines=state.lines.filter(line => line.isActive && state.workstationPlans.some(({plan})=>
     plan.productionLineId===line.id && plan.lineCapacityRevision===line.capacityRevision &&
     plan.routingRevision===s.routingRevision && plan.status==="Approved" &&
-    plan.laborFeasible && plan.machineFeasible));
+    plan.laborFeasible && plan.machineFeasible && plan.skillFeasible &&
+    plan.assignedOperators===plan.requiredOperators &&
+    state.plans.some(({plan:baseline})=>baseline.productionLineId===line.id &&
+      baseline.lineCapacityRevision===line.capacityRevision &&
+      baseline.routingRevision===s.routingRevision &&
+      baseline.targetDailyQuantity===plan.targetDailyQuantity &&
+      baseline.status==="Approved" && baseline.laborFeasible && baseline.machineFeasible)));
   const checkMap=new Map(d.checks.map(x=>[x.code,x]));
   return "<h4 class='work-title'>Production Readiness Gate</h4><p class='work-desc'>Kiểm tra 8 điều kiện tiền sản xuất trước khi phát hành mã hàng sang chuyền.</p>" +
   (released ?
