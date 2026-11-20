@@ -32,7 +32,7 @@ Given official IE-approved operations `i`, with `SMV_i` in minutes/piece, line s
 - Saved line plans are immutable snapshots; editing staffing/machines/efficiency creates a new line capacity revision.
 - An approved plan becomes **stale automatically** if the style's routing revision or the production line's capacity revision changes.
 - The line-capacity approval is **in addition** to the manual `LineBalanceApproved` readiness checklist item.
-- `POST /api/styles/{id}/release` requires a current approved feasible plan for the exact requested line code.
+- `POST /api/styles/{id}/release` requires both a current Phase 3 line baseline and Phase 4 qualified WorkstationPlan for the exact requested line and same target/day.
 - Released styles are immutable via existing style mutation endpoints. The release document stores line code, quote and costing references.
 
 ## Example using a sewing line
@@ -41,7 +41,7 @@ A line with 20 available operators, 480-minute shift and 85% effective efficienc
 For a large 37-operation garment, this baseline may overestimate staff compared with a properly balanced multi-operation workstation layout. IE review is mandatory.
 
 ## Next engineering milestones
-1. Expand the implemented IE reference catalog into workstation and operator skills libraries with cross-trained multi-operation grouping.
+1. Extend the implemented workstation grouping heuristic and operator skills matrix to precedence-aware global balancing with actual employee shift availability.
 2. Factory-scoped line IDs, operator shift calendars and machine downtime.
 3. Material availability from ERP/MRP and confirmed production window from APS.
 4. IAM/SSO, role-based approvals, verified audit trail, transactional revision locking, migrations and evidence attachments.

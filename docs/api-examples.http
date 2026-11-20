@@ -5,6 +5,8 @@
 @quoteId = REPLACE_WITH_QUOTE_ID
 @lineId = REPLACE_WITH_LINE_ID
 @linePlanId = REPLACE_WITH_PLAN_ID
+@workstationPlanId = REPLACE_WITH_WORKSTATION_PLAN_ID
+@operatorId = REPLACE_WITH_OPERATOR_ID
 @standardId1 = REPLACE_WITH_STANDARD_1_ID
 @standardId2 = REPLACE_WITH_STANDARD_2_ID
 
@@ -100,6 +102,50 @@ POST {{base}}/api/line-plans/{{linePlanId}}/approve
 Content-Type: application/json
 
 {"approvedBy":"IE Lead"}
+
+### Register an operator with qualified machine skills (changes line revision)
+POST {{base}}/api/lines/{{lineId}}/operators
+Content-Type: application/json
+
+{"employeeCode":"OP-001","displayName":"Training Operator A","skills":[{"machineType":"OVERLOCK","level":4},{"machineType":"COVERSTITCH","level":3}]}
+
+### Register another distinct operator for coverstitch work
+POST {{base}}/api/lines/{{lineId}}/operators
+Content-Type: application/json
+
+{"employeeCode":"OP-002","displayName":"Training Operator B","skills":[{"machineType":"COVERSTITCH","level":3}]}
+
+### Fetch skill matrix
+GET {{base}}/api/lines/{{lineId}}/operators
+
+### Update operator skills (increments capacity revision)
+PUT {{base}}/api/operators/{{operatorId}}
+Content-Type: application/json
+
+{"displayName":"Training Operator A","isActive":true,"skills":[{"machineType":"OVERLOCK","level":4},{"machineType":"COVERSTITCH","level":4}]}
+
+### IMPORTANT: Recreate and approve Phase 3 line plan after any operator/skill change.
+
+### Preview skill-aware grouping
+POST {{base}}/api/styles/{{styleId}}/workstation-plans/preview
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100,"minimumSkillLevel":2}
+
+### Save WorkstationPlan snapshot
+POST {{base}}/api/styles/{{styleId}}/workstation-plans
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100,"minimumSkillLevel":2}
+
+### Approve only with current matching Phase 3 baseline
+POST {{base}}/api/workstation-plans/{{workstationPlanId}}/approve
+Content-Type: application/json
+
+{"approvedBy":"IE Lead"}
+
+### List grouped station snapshots
+GET {{base}}/api/styles/{{styleId}}/workstation-plans
 
 ### Calculate costing
 POST {{base}}/api/styles/{{styleId}}/costs
