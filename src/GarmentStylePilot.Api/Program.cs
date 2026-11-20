@@ -1,10 +1,13 @@
 using GarmentStylePilot.Api.Data;
 using GarmentStylePilot.Api.Features;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 var provider = builder.Configuration["Database:Provider"] ?? "Sqlite";
 builder.Services.AddDbContext<GarmentDbContext>(options =>
 {

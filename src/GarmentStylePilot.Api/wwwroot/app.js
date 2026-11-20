@@ -304,7 +304,7 @@ function readinessTab() {
     " · Planned start: " + h(d.release?.plannedStartDate) + " · Người duyệt: " + h(d.release?.approvedBy) + "</div>" :
     "<div class='alert "+(ready?"success":"warning")+"'><strong>"+(ready?"Đủ điều kiện phát hành":"Chưa đủ điều kiện phát hành")+"</strong>"+
     (ready?" — Đã hoàn thành Production Gate.":" — Hãy hoàn thiện những điều kiện bên dưới.")+"</div>")+
-  (!ready?"<div class='section-card'><h4>Release Blockers ("+state.readiness.blockers.length+")</h4><ul class='data-muted'>"+
+  (!ready && !released?"<div class='section-card'><h4>Release Blockers ("+state.readiness.blockers.length+")</h4><ul class='data-muted'>"+
     state.readiness.blockers.map(x=>"<li>"+h(x)+"</li>").join("")+"</ul></div>":"")+
   "<div class='grid-checks'>"+state.codes.map(code=>{
     const c=checkMap.get(code), done=!!c?.verified, names=checkLabels[code]||[code,""];
