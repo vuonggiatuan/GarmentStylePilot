@@ -23,14 +23,15 @@ By default the database is SQLite (created automatically). To use SQL Server, se
 2. Add sample and approve it: `POST /api/styles/{id}/samples`, `POST /api/samples/{sampleId}/approve`.
 3. Set BOM and routing: `PUT /api/styles/{id}/bom`, `PUT /api/styles/{id}/operations`.
 4. Approve their latest revisions: `POST /api/styles/{id}/bom/approve`, `POST /api/styles/{id}/operations/approve`.
-5. Register line capacity and available machines: `POST /api/lines`, `PUT /api/lines/{lineId}/machines`.
-6. Preview staffing vs target/day: `POST /api/styles/{id}/line-plans/preview`.
-7. Save a line plan and have IE approve it: `POST /api/styles/{id}/line-plans`, `POST /api/line-plans/{planId}/approve`.
-8. Costing: `POST /api/styles/{id}/costs`, `POST /api/costs/{costId}/approve`.
-9. Quotation: `POST /api/styles/{id}/quotes`, `POST /api/quotes/{quoteId}/accept`.
-10. Verify eight readiness checks (see `GET /api/readiness-codes`) using `PUT /api/styles/{id}/readiness/{code}`.
-11. View release blockers: `GET /api/styles/{id}/readiness`.
-12. Production release: `POST /api/styles/{id}/release` with **the same line code as an approved current line plan**, planned start date and approver.
+5. Reuse IE operation standards: `GET /api/operation-standards`, `POST /api/operation-standards`, `POST /api/styles/{id}/operations/from-library`. Every import creates a new routing revision that requires IE approval.
+6. Register line capacity and available machines: `POST /api/lines`, `PUT /api/lines/{lineId}/machines`.
+7. Preview staffing vs target/day: `POST /api/styles/{id}/line-plans/preview`.
+8. Save a line plan and have IE approve it: `POST /api/styles/{id}/line-plans`, `POST /api/line-plans/{planId}/approve`.
+9. Costing: `POST /api/styles/{id}/costs`, `POST /api/costs/{costId}/approve`.
+10. Quotation: `POST /api/styles/{id}/quotes`, `POST /api/quotes/{quoteId}/accept`.
+11. Verify eight readiness checks (see `GET /api/readiness-codes`) using `PUT /api/styles/{id}/readiness/{code}`.
+12. View release blockers: `GET /api/styles/{id}/readiness`.
+13. Production release: `POST /api/styles/{id}/release` with **the same line code as an approved current line plan**, planned start date and approver.
 
 ### Example
 
@@ -60,6 +61,12 @@ Upload a forecast through `POST /api/styles/{id}/smv-estimates`. The payload con
 
 When BOM or IE routing changes, all verified production readiness checks are reset and require explicit re-verification. Approved cost sheets and customer quotes from older revisions cannot pass the gate.
 
+## Phase 3: IE operation library
+
+Create reusable GST/IE operation reference standards with `Code`, `ComponentName`, `OperationName`, `MachineType`, `MethodCode` and `ReferenceSmvMinutes`. Changing an existing standard increments `Revision`. Styles can import a selected list of standards into a **new routing revision** via `POST /api/styles/{id}/operations/from-library`.
+
+The imported operation keeps a snapshot of name, machine, SMV, standard ID and standard revision. Editing the shared standard later does **not** alter historical style routing; importing a reference does **not** approve it. IE still has to review operations and explicitly approve the current routing revision before costing, line planning or release. See `docs/api-examples.http`.
+
 ## Phase 3: Line capacity & engineering staffing
 
 The Line Planning tab lets IE configure a production line's factory, code, available operators, shift length, planned efficiency and machine inventory. A saved plan captures the official IE routing revision and the line capacity revision. Approval is blocked if **either operators or machines are insufficient**; a release is blocked unless it references a still-current approved plan for the requested line.
@@ -84,7 +91,7 @@ Release blocks missing approved sample, incomplete BOM, unapproved latest BOM/ro
 
 ## Architecture
 
-- `Domain`: style, sample, BOM, operations, costing, quote, production line, machine capacity, line plan and release.
+- `Domain`: style, sample, BOM, revisioned IE standard operations, routing, costing, quote, production line, machine capacity, line plan and release.
 - `Application`: deterministic cost calculator, conservative IE staffing calculator and production gate.
 - `Data`: EF Core persistence (SQLite or SQL Server).
 - `Features`: minimal API route handlers.
@@ -98,7 +105,7 @@ Release blocks missing approved sample, incomplete BOM, unapproved latest BOM/ro
 
 1. Identity/RBAC, audit trail, change control and versioned technical packs.
 2. Fabric consumption, BOM variants, size/color matrices, supplier quotes, USD/VND/TWD and landed costs.
-3. Extend the new machine/staff line planning baseline to cross-trained workstation grouping, skill matrices, real line balancing and APS capacity constraints.
+3. Extend the new IE reference library, machine/staff line planning baseline to cross-trained workstation grouping, skill matrices, real line balancing and APS capacity constraints.
 4. PPC material availability, capacity, PP meeting and pilot-run evidence attachments.
 5. ERP/MES/APS adapters, idempotent release/outbox, permissions and cross-factory deployment.
 

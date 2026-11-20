@@ -5,6 +5,8 @@
 @quoteId = REPLACE_WITH_QUOTE_ID
 @lineId = REPLACE_WITH_LINE_ID
 @linePlanId = REPLACE_WITH_PLAN_ID
+@standardId1 = REPLACE_WITH_STANDARD_1_ID
+@standardId2 = REPLACE_WITH_STANDARD_2_ID
 
 ### Create style
 POST {{base}}/api/styles
@@ -35,6 +37,27 @@ PUT {{base}}/api/styles/{{styleId}}/operations
 Content-Type: application/json
 
 [{"sequenceNo":1,"name":"Join shoulder","machineType":"Overlock","smvMinutes":0.62},{"sequenceNo":2,"name":"Attach neck rib","machineType":"Coverstitch","smvMinutes":1.24}]
+
+### Create reusable IE operation standard
+POST {{base}}/api/operation-standards
+Content-Type: application/json
+
+{"code":"GST-101","componentName":"Body","operationName":"Join shoulder","machineType":"Overlock","methodCode":"IE-STD","referenceSmvMinutes":0.62}
+
+### Catalog list
+GET {{base}}/api/operation-standards
+
+### Import catalog selections into style's own new routing revision
+POST {{base}}/api/styles/{{styleId}}/operations/from-library
+Content-Type: application/json
+
+[{"sequenceNo":1,"operationStandardId":"REPLACE_WITH_STANDARD_1_ID"},{"sequenceNo":2,"operationStandardId":"REPLACE_WITH_STANDARD_2_ID"}]
+
+### Update standard only; historical style routing snapshot is unaffected
+PUT {{base}}/api/operation-standards/{{standardId1}}
+Content-Type: application/json
+
+{"componentName":"Body","operationName":"Join shoulder","machineType":"Overlock","methodCode":"IE-STD","referenceSmvMinutes":0.88,"isActive":true}
 
 ### Approve BOM
 POST {{base}}/api/styles/{{styleId}}/bom/approve

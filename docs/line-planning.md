@@ -3,6 +3,9 @@
 ## Purpose
 GarmentStylePilot is a pre-production engineering platform, not an execution MES. This version ensures that a style cannot be *Production Released* to a given sewing line until IE has accepted a feasible staffing/machine plan tied to the currently approved routing and current line capacity.
 
+## IE reference catalog
+The `OperationStandards` table holds global reusable IE operation references. `Code` is unique, `Revision` increments on every edit, and `IsActive=false` blocks new imports. Importing a set of standards creates a new style routing revision with copied SMV, machine type and source standard/version metadata. The import is *not* an IE approval. A later reference change does not silently affect already-imported style routing.
+
 ## Data entities
 | Table | Grain | Details |
 | --- | --- | --- |
@@ -38,7 +41,7 @@ A line with 20 available operators, 480-minute shift and 85% effective efficienc
 For a large 37-operation garment, this baseline may overestimate staff compared with a properly balanced multi-operation workstation layout. IE review is mandatory.
 
 ## Next engineering milestones
-1. Workstation and operator skills library with cross-trained multi-operation grouping.
+1. Expand the implemented IE reference catalog into workstation and operator skills libraries with cross-trained multi-operation grouping.
 2. Factory-scoped line IDs, operator shift calendars and machine downtime.
 3. Material availability from ERP/MRP and confirmed production window from APS.
 4. IAM/SSO, role-based approvals, verified audit trail, transactional revision locking, migrations and evidence attachments.
