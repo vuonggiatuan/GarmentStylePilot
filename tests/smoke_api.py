@@ -186,6 +186,32 @@ def run_scenario(base):
     assert len(codes) == len(set(codes)) == 2
     print("✓ multi-skilled employees are never double-counted")
 
+    # Phase 4 grouping demonstration: adjacent OVERLOCK operations share one station
+    # instead of allocating a dedicated worker to every operation.
+    style_two = assert_status(base, "POST", "/api/styles", {
+        "code": "SMOKE-002", "customer": "Demo Apparel",
+        "description": "Consecutive same-machine operations", "currency": "USD"
+    }, 201)
+    second = f"/api/styles/{style_two['id']}"
+    assert_status(base, "PUT", second + "/operations", [
+        {"sequenceNo": 1, "name": "Overlock step A", "machineType": "Overlock", "smvMinutes": 0.62},
+        {"sequenceNo": 2, "name": "Overlock step B", "machineType": "Overlock", "smvMinutes": 0.60},
+        {"sequenceNo": 3, "name": "Cover seam", "machineType": "Coverstitch", "smvMinutes": 1.24}
+    ])
+    assert_status(base, "POST", second + "/operations/approve", {"approvedBy": "IE Lead"})
+    dedicated = assert_status(base, "POST", second + "/line-plans/preview", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    })
+    grouped = assert_status(base, "POST", second + "/workstation-plans/preview", {
+        "productionLineId": line["id"], "targetDailyQuantity": 100
+    })
+    assert dedicated["calculation"]["requiredOperators"] == 3
+    assert grouped["calculation"]["requiredOperators"] == 2
+    assert len(grouped["calculation"]["stations"]) == 2
+    assert [x["sequenceNo"] for x in grouped["calculation"]["stations"][0]["operations"]] == [1, 2]
+    assert grouped["calculation"]["canMeetTarget"]
+    print("✓ two adjacent same-machine operations share a staffed workstation")
+
     # Infeasible machine/staff plan must not receive IE approval.
     constrained = assert_status(base, "POST", "/api/lines", {
         "code": "A02", "name": "Limited A02", "factoryCode": "MY-PHUOC",
