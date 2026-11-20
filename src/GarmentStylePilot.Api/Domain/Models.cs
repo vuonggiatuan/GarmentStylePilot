@@ -43,6 +43,25 @@ public sealed class BomLine
     public decimal WastagePercent { get; set; }
 }
 
+/// <summary>
+/// An AI estimate is a non-authoritative planning suggestion, never an IE-approved routing.
+/// It must not be used for production release or final costing.
+/// </summary>
+public sealed class SmvEstimate
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid StyleId { get; set; }
+    public string ModelVersion { get; set; } = "";
+    public string Source { get; set; } = "AI";
+    public int PredictedOperationCount { get; set; }
+    public decimal PredictedSmvMinutes { get; set; }
+    public decimal SmvLower80 { get; set; }
+    public decimal SmvUpper80 { get; set; }
+    public decimal? ViewConsistencyPercent { get; set; }
+    public string Confidence { get; set; } = "";
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
 public sealed class SewingOperation
 {
     public Guid Id { get; set; } = Guid.NewGuid();

@@ -9,6 +9,7 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
     public DbSet<Sample> Samples => Set<Sample>();
     public DbSet<BomLine> BomLines => Set<BomLine>();
     public DbSet<SewingOperation> SewingOperations => Set<SewingOperation>();
+    public DbSet<SmvEstimate> SmvEstimates => Set<SmvEstimate>();
     public DbSet<CostSheet> CostSheets => Set<CostSheet>();
     public DbSet<Quote> Quotes => Set<Quote>();
     public DbSet<ReadinessCheck> ReadinessChecks => Set<ReadinessCheck>();
@@ -28,6 +29,10 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
         modelBuilder.Entity<BomLine>().Property(x => x.UnitPrice).HasPrecision(18, 4);
         modelBuilder.Entity<BomLine>().Property(x => x.WastagePercent).HasPrecision(9, 4);
         modelBuilder.Entity<SewingOperation>().Property(x => x.SmvMinutes).HasPrecision(18, 4);
+        modelBuilder.Entity<SmvEstimate>().Property(x => x.PredictedSmvMinutes).HasPrecision(18, 4);
+        modelBuilder.Entity<SmvEstimate>().Property(x => x.SmvLower80).HasPrecision(18, 4);
+        modelBuilder.Entity<SmvEstimate>().Property(x => x.SmvUpper80).HasPrecision(18, 4);
+        modelBuilder.Entity<SmvEstimate>().Property(x => x.ViewConsistencyPercent).HasPrecision(8, 2);
         modelBuilder.Entity<CostSheet>().Property(x => x.MinuteRate).HasPrecision(18, 4);
         modelBuilder.Entity<CostSheet>().Property(x => x.OverheadPerPiece).HasPrecision(18, 4);
         modelBuilder.Entity<CostSheet>().Property(x => x.TargetMarginPercent).HasPrecision(9, 4);
@@ -41,6 +46,7 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
         modelBuilder.Entity<Sample>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<BomLine>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<SewingOperation>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
+        modelBuilder.Entity<SmvEstimate>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<CostSheet>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<Quote>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<Quote>().HasOne<CostSheet>().WithMany().HasForeignKey(x => x.CostSheetId)

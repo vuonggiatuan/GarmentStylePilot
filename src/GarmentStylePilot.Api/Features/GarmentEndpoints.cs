@@ -12,6 +12,9 @@ public static class GarmentEndpoints
     public sealed record BomInput(string MaterialCode, string Category, string Unit, decimal Consumption,
         decimal UnitPrice, decimal WastagePercent);
     public sealed record OperationInput(int SequenceNo, string Name, string MachineType, decimal SmvMinutes);
+    public sealed record SmvEstimateInput(string ModelVersion, string? Source, int PredictedOperationCount,
+        decimal PredictedSmvMinutes, decimal SmvLower80, decimal SmvUpper80,
+        decimal? ViewConsistencyPercent, string? Confidence);
     public sealed record Approval(string ApprovedBy);
     public sealed record CostInput(decimal MinuteRate, decimal OverheadPerPiece, decimal TargetMarginPercent);
     public sealed record QuoteInput(Guid CostSheetId, decimal UnitPrice);
@@ -66,6 +69,8 @@ public static class GarmentEndpoints
                 bom = await db.BomLines.Where(x => x.StyleId == id).ToListAsync(),
                 operations = await db.SewingOperations.Where(x => x.StyleId == id)
                     .OrderBy(x => x.SequenceNo).ToListAsync(),
+                smvEstimates = await db.SmvEstimates.Where(x => x.StyleId == id)
+                    .OrderByDescending(x => x.CreatedAtUtc).ToListAsync(),
                 costs = await db.CostSheets.Where(x => x.StyleId == id).ToListAsync(),
                 quotes = await db.Quotes.Where(x => x.StyleId == id).ToListAsync(),
                 checks = await db.ReadinessChecks.Where(x => x.StyleId == id).ToListAsync(),
@@ -73,7 +78,42 @@ public static class GarmentEndpoints
             });
         });
 
-        api.MapPost("/styles/{id:guid}/samples", async (Guid id, SampleInput input, GarmentDbContext db) =>
+        // The AI estimate and official IE-approved operation routing are intentionally separate.
+        // Importing an estimate never changes routing revision, approvals or costing.
+        api.MapPost("/styles/{id:guid}/smv-estimates", async (Guid id, SmvEstimateInput input,
+            GarmentDbContext db) =>
+        {
+            if (await Editable(db, id) is null)
+                return Results.NotFound(new { error = "Style not found or already released." });
+            if (string.IsNullOrWhiteSpace(input.ModelVersion) || input.ModelVersion.Length > 80 ||
+                input.PredictedOperationCount <= 0 || input.PredictedSmvMinutes <= 0 ||
+                input.SmvLower80 <= 0 || input.SmvUpper80 < input.SmvLower80 ||
+                input.PredictedSmvMinutes < input.SmvLower80 ||
+                input.PredictedSmvMinutes > input.SmvUpper80 ||
+                (input.ViewConsistencyPercent.HasValue &&
+                 (input.ViewConsistencyPercent < 0 || input.ViewConsistencyPercent > 100)))
+                return Results.BadRequest(new { error = "Provide valid model version, operation count, SMV and 80% interval." });
+
+            var estimate = new SmvEstimate
+            {
+                StyleId = id, ModelVersion = input.ModelVersion.Trim(),
+                Source = string.IsNullOrWhiteSpace(input.Source) ? "AI" : input.Source.Trim(),
+                PredictedOperationCount = input.PredictedOperationCount,
+                PredictedSmvMinutes = input.PredictedSmvMinutes,
+                SmvLower80 = input.SmvLower80, SmvUpper80 = input.SmvUpper80,
+                ViewConsistencyPercent = input.ViewConsistencyPercent,
+                Confidence = input.Confidence?.Trim() ?? ""
+            };
+            db.SmvEstimates.Add(estimate);
+            await db.SaveChangesAsync();
+            return Results.Created($"/api/styles/{id}", new
+            {
+                estimate, classification = "AI_ESTIMATE_NOT_IE_APPROVED",
+                message = "IE must independently validate and approve official routing operations."
+            });
+        });
+
+                api.MapPost("/styles/{id:guid}/samples", async (Guid id, SampleInput input, GarmentDbContext db) =>
         {
             var style = await Editable(db, id);
             if (style is null) return Results.NotFound(new { error = "Style not found or released." });
@@ -116,6 +156,7 @@ public static class GarmentEndpoints
                 WastagePercent = x.WastagePercent
             }));
             style.BomRevision++;
+            await InvalidateReadiness(db, id);
             await db.SaveChangesAsync();
             return Results.Ok(new { style.BomRevision, approvalRequired = true });
         });
@@ -134,6 +175,7 @@ public static class GarmentEndpoints
                 MachineType = x.MachineType ?? "", SmvMinutes = x.SmvMinutes
             }));
             style.RoutingRevision++;
+            await InvalidateReadiness(db, id);
             await db.SaveChangesAsync();
             return Results.Ok(new { style.RoutingRevision, approvalRequired = true });
         });
@@ -314,6 +356,19 @@ public static class GarmentEndpoints
             return Results.Created($"/api/styles/{id}", release);
         });
         return app;
+    }
+
+    // A changed BOM or engineering routing invalidates the previously verified production checklist.
+    private static async Task InvalidateReadiness(GarmentDbContext db, Guid styleId)
+    {
+        var checks = await db.ReadinessChecks.Where(x => x.StyleId == styleId).ToListAsync();
+        foreach (var check in checks)
+        {
+            check.Verified = false;
+            check.VerifiedBy = null;
+            check.VerifiedAtUtc = null;
+            check.Notes = "Reverification required after BOM or IE routing change.";
+        }
     }
 
     private static Task<Style?> Editable(GarmentDbContext db, Guid id) =>
