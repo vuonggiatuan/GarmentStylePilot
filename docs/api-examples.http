@@ -3,6 +3,8 @@
 @sampleId = REPLACE_WITH_SAMPLE_ID
 @costId = REPLACE_WITH_COST_ID
 @quoteId = REPLACE_WITH_QUOTE_ID
+@lineId = REPLACE_WITH_LINE_ID
+@linePlanId = REPLACE_WITH_PLAN_ID
 
 ### Create style
 POST {{base}}/api/styles
@@ -42,6 +44,36 @@ Content-Type: application/json
 
 ### Approve IE routing
 POST {{base}}/api/styles/{{styleId}}/operations/approve
+Content-Type: application/json
+
+{"approvedBy":"IE Lead"}
+
+### Define production line (once per factory line)
+POST {{base}}/api/lines
+Content-Type: application/json
+
+{"code":"A01","name":"Sewing A01","factoryCode":"MY-PHUOC","maximumOperators":20,"shiftMinutes":480,"plannedEfficiencyPercent":85}
+
+### Configure available machines (increments line capacity revision)
+PUT {{base}}/api/lines/{{lineId}}/machines
+Content-Type: application/json
+
+[{"machineType":"OVERLOCK","availableCount":5},{"machineType":"COVERSTITCH","availableCount":5}]
+
+### Preview conservative operation staffing / machine constraints
+POST {{base}}/api/styles/{{styleId}}/line-plans/preview
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100}
+
+### Save plan snapshot
+POST {{base}}/api/styles/{{styleId}}/line-plans
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100}
+
+### IE approves feasible plan for current official routing and line revision
+POST {{base}}/api/line-plans/{{linePlanId}}/approve
 Content-Type: application/json
 
 {"approvedBy":"IE Lead"}
