@@ -9,6 +9,7 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
     public DbSet<Sample> Samples => Set<Sample>();
     public DbSet<BomLine> BomLines => Set<BomLine>();
     public DbSet<SewingOperation> SewingOperations => Set<SewingOperation>();
+    public DbSet<OperationStandard> OperationStandards => Set<OperationStandard>();
     public DbSet<SmvEstimate> SmvEstimates => Set<SmvEstimate>();
     public DbSet<CostSheet> CostSheets => Set<CostSheet>();
     public DbSet<Quote> Quotes => Set<Quote>();
@@ -22,6 +23,8 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Style>().HasIndex(x => x.Code).IsUnique();
+        modelBuilder.Entity<OperationStandard>().HasIndex(x => x.Code).IsUnique();
+        modelBuilder.Entity<OperationStandard>().Property(x => x.ReferenceSmvMinutes).HasPrecision(18, 4);
         modelBuilder.Entity<ReadinessCheck>().HasIndex(x => new { x.StyleId, x.Code }).IsUnique();
         modelBuilder.Entity<ProductionRelease>().HasIndex(x => x.StyleId).IsUnique();
         modelBuilder.Entity<ProductionLine>().HasIndex(x => x.Code).IsUnique();
@@ -59,6 +62,8 @@ public sealed class GarmentDbContext(DbContextOptions<GarmentDbContext> options)
         modelBuilder.Entity<Sample>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<BomLine>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<SewingOperation>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
+        modelBuilder.Entity<SewingOperation>().HasOne<OperationStandard>().WithMany()
+            .HasForeignKey(x => x.OperationStandardId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<SmvEstimate>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<CostSheet>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);
         modelBuilder.Entity<Quote>().HasOne<Style>().WithMany().HasForeignKey(x => x.StyleId);

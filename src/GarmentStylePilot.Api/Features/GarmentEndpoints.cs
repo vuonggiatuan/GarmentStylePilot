@@ -363,7 +363,7 @@ public static class GarmentEndpoints
     }
 
     // A changed BOM or engineering routing invalidates the previously verified production checklist.
-    private static async Task InvalidateReadiness(GarmentDbContext db, Guid styleId)
+    internal static async Task InvalidateReadiness(GarmentDbContext db, Guid styleId)
     {
         var checks = await db.ReadinessChecks.Where(x => x.StyleId == styleId).ToListAsync();
         foreach (var check in checks)

@@ -62,6 +62,22 @@ public sealed class SmvEstimate
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
+// Shared IE reference library. Entries are not a style approval and must be
+// validated in each style's routing before production release.
+public sealed class OperationStandard
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Code { get; set; } = "";
+    public string ComponentName { get; set; } = "";
+    public string OperationName { get; set; } = "";
+    public string MachineType { get; set; } = "";
+    public string MethodCode { get; set; } = "";
+    public decimal ReferenceSmvMinutes { get; set; }
+    public int Revision { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
 public sealed class SewingOperation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -70,6 +86,8 @@ public sealed class SewingOperation
     public string Name { get; set; } = "";
     public string MachineType { get; set; } = "";
     public decimal SmvMinutes { get; set; }
+    public Guid? OperationStandardId { get; set; }
+    public int? StandardRevision { get; set; }
 }
 
 public sealed class CostSheet

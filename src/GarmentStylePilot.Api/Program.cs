@@ -59,6 +59,7 @@ app.UseStaticFiles();
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 app.MapGarmentEndpoints();
 app.MapLinePlanningEndpoints();
+app.MapOperationStandardEndpoints();
 app.Run();
 
 public partial class Program;
