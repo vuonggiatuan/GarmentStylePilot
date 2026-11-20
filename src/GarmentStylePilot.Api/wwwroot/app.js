@@ -410,6 +410,104 @@ function lineTab() {
     "</div>";
 }
 
+
+function skillList(raw) {
+  const entries=raw.split(",").map(s=>s.trim()).filter(Boolean);
+  if(entries.length===0 || entries.length>20) throw new Error("Nhập ít nhất một loại máy:LEVEL.");
+  const skills=entries.map(e=>{
+    const match=/^([^:,]{1,80}):([1-5])$/.exec(e);
+    if(!match) throw new Error("Định dạng tay nghề: OVERLOCK:4,COVERSTITCH:3 (cấp 1–5).");
+    return {machineType:match[1].trim(),level:Number(match[2])};
+  });
+  if(new Set(skills.map(x=>x.machineType.toUpperCase())).size!==skills.length)
+    throw new Error("Không nhập trùng loại máy.");
+  return skills;
+}
+function workstationTab() {
+  const s=state.detail.style, lines=state.lines;
+  const current=lines.find(x=>x.id===state.selectedLineId)||lines[0];
+  const activeLine=!!current && current.isActive;
+  const preview=state.workstationPreview &&
+    state.workstationPreview.lineId===current?.id ? state.workstationPreview.result : null;
+  const history=state.workstationPlans.filter(x=>x.plan.productionLineId===current?.id);
+  const released=!active(), locked=!activeLine||released;
+  const roster=state.workers;
+  const target=state.planTargetQty,skill=state.wsSkillLevel;
+  return "<h4 class='work-title'>Workstation Balancing · Skill Matrix</h4>" +
+    "<p class='work-desc'>Gộp các công đoạn liên tiếp cùng loại máy thành trạm, tính nhân lực theo takt, sau đó phân công mỗi nhân viên vào tối đa một trạm dựa trên tay nghề.</p>" +
+    (!lines.length?"<div class='alert warning'>Chưa có chuyền. Tạo chuyền trong tab Line Planning.</div>":
+    "<label class='field' style='max-width:400px'>Chọn chuyền<select id='wsLineSelector'>"+
+      lines.map(x=>"<option value='"+h(x.id)+"' "+(x.id===current?.id?"selected":"")+">"+
+        h(x.factoryCode)+" / "+h(x.code)+" · "+h(x.maximumOperators)+" operators"+(x.isActive?"":" (inactive)")+
+        "</option>").join("")+"</select></label>"+
+    "<div class='meta-grid'><div class='meta-card'><span>Nhân viên đăng ký</span><strong>"+
+      h(roster.length)+"</strong></div><div class='meta-card'><span>Tay nghề đạt</span><strong>"+
+      h(roster.filter(x=>x.isActive).length)+"</strong><small class='hint'>Active; skill kiểm tra theo trạm</small></div>"+
+    "<div class='meta-card'><span>Line Capacity Rev</span><strong>R"+h(current.capacityRevision)+
+      "</strong></div></div>")+
+    "<div class='two-col'><div class='section-card'><h4>Operator Skill Matrix</h4>"+
+      "<p>Level 1–5 theo loại máy. Level 2 là ngưỡng tối thiểu mặc định trong mô phỏng.</p>"+
+      (roster.length?"<div class='table-wrap'><table><thead><tr><th>Nhân viên</th><th>Machine Skills</th><th>Trạng thái</th><th></th></tr></thead><tbody>"+
+        roster.map(person=>"<tr><td><strong>"+h(person.employeeCode)+"</strong><div class='data-muted'>"+
+        h(person.displayName)+"</div></td><td>"+h(person.skills.map(x=>x.machineType+":"+x.level).join(", "))+
+        "</td><td>"+(person.isActive?"<span class='pill good'>Active</span>":"<span class='pill warning'>Inactive</span>")+
+        "</td><td><button class='button tiny ghost' data-action='edit-operator' data-id='"+h(person.id)+"' "+
+        (released?"disabled":"")+">Sửa</button></td></tr>").join("")+"</tbody></table></div>":
+        "<p>Chưa có nhân viên cho chuyền này.</p>")+"</div>"+
+    "<div class='section-card'><h4>Thêm nhân viên & tay nghề</h4>"+
+      (current?"<form id='operatorForm'><label class='field'>Mã nhân viên<input name='employeeCode' maxlength='40' placeholder='OP-001' required></label>"+
+        "<label class='field' style='margin-top:10px'>Tên nhân viên<input name='displayName' placeholder='Operator name' required></label>"+
+        "<label class='field' style='margin-top:10px'>Tay nghề (Machine:Level)<input name='skillsText' placeholder='OVERLOCK:4,COVERSTITCH:3' required></label>"+
+        "<p>Thêm/sửa hồ sơ sẽ tạo phiên bản năng lực chuyền mới. Kế hoạch cũ phải được mô phỏng và duyệt lại.</p>"+
+        "<button class='button primary' "+(released?"disabled":"")+">+ Thêm nhân viên</button></form>":
+        "<p>Chưa có chuyền.</p>")+"</div></div>"+
+    "<div class='section-card'><h4>Mô phỏng & phân nhóm Workstation</h4>"+
+      "<p>Chỉ sử dụng IE routing đã duyệt. Workstation grouping là heuristic dựa trên các công đoạn liên tiếp cùng loại máy, chưa tối ưu toàn cục.</p>"+
+      (current?"<form id='workstationForm' class='form-row'><label>Số lượng / ngày<input name='targetDailyQuantity' type='number' min='1' max='200000' value='"+
+        h(target)+"' required></label><label>Skill tối thiểu<select name='minimumSkillLevel'>"+
+        [1,2,3,4,5].map(x=>"<option value='"+x+"' "+(x===skill?"selected":"")+">Level "+x+"</option>").join("")+
+        "</select></label><button type='button' class='button secondary' data-action='preview-workstation' "+
+        (locked?"disabled":"")+">Mô phỏng</button><button class='button primary' "+
+        (locked?"disabled":"")+">Lưu kế hoạch</button></form>":
+        "<p>Tạo chuyền trước khi mô phỏng.</p>")+
+      (preview?"<div class='meta-grid'><div class='meta-card'><span>Workstations</span><strong>"+
+        h(preview.calculation.stations.length)+"</strong></div><div class='meta-card'><span>Required / Assigned</span><strong>"+
+        h(preview.calculation.requiredOperators)+" / "+h(preview.calculation.assignedOperators)+"</strong></div>"+
+        "<div class='meta-card'><span>Takt (min)</span><strong>"+fmt(preview.calculation.taktMinutes,3)+"</strong></div></div>"+
+        "<div class='alert "+(preview.calculation.canMeetTarget?"success":"danger")+"'>"+
+        (preview.calculation.canMeetTarget?"Đạt: số người, máy và tay nghề theo mô hình.":
+        "Không đạt: kiểm tra thiếu người, tay nghề hoặc máy.")+
+        (preview.calculation.machineShortfalls.length?"<ul>"+preview.calculation.machineShortfalls.map(x=>
+          "<li>"+h(x.machineType)+": yêu cầu "+h(x.required)+", hiện có "+h(x.available)+"</li>").join("")+"</ul>":"")+
+        "</div><div class='table-wrap'><table><thead><tr><th>Station</th><th>Machine</th><th>Operation sequences</th><th>SMV</th><th>Staff</th><th>Assigned Employees</th></tr></thead><tbody>"+
+        preview.calculation.stations.map(x=>"<tr><td>#"+h(x.stationNumber)+"</td><td>"+h(x.machineType)+
+          "</td><td>"+h(x.operations.map(y=>y.sequenceNo).join(", "))+"</td><td>"+fmt(x.combinedSmvMinutes)+
+          "</td><td>"+h(x.requiredOperators)+"</td><td>"+
+          h(x.assignedEmployeeCodes.join(", ")||"Chưa đủ người")+"</td></tr>").join("")+
+        "</tbody></table></div>":"")+"</div>"+
+    "<div class='section-card'><h4>Saved Workstation Plans ("+h(history.length)+")</h4>"+
+      (!history.length?"<p>Chưa có kế hoạch trạm cho chuyền này.</p>":
+      "<div class='table-wrap'><table><thead><tr><th>Version</th><th>Target</th><th>Stations</th><th>Staffing</th><th>Status</th><th>Approval</th></tr></thead><tbody>"+
+        history.map(({plan,stations})=>{
+          const fresh=current && plan.lineCapacityRevision===current.capacityRevision &&
+            plan.routingRevision===s.routingRevision;
+          const baseline=state.plans.some(({plan:x})=>x.productionLineId===current?.id &&
+            x.lineCapacityRevision===current?.capacityRevision &&
+            x.routingRevision===s.routingRevision && x.targetDailyQuantity===plan.targetDailyQuantity &&
+            x.status==="Approved" && x.laborFeasible && x.machineFeasible);
+          const feasible=plan.laborFeasible&&plan.machineFeasible&&plan.skillFeasible&&
+            plan.assignedOperators===plan.requiredOperators;
+          return "<tr><td>IE R"+h(plan.routingRevision)+" / Line R"+h(plan.lineCapacityRevision)+
+            "</td><td>"+h(plan.targetDailyQuantity)+"</td><td>"+h(stations.length)+"</td><td>"+
+            h(plan.assignedOperators)+"/"+h(plan.requiredOperators)+"</td><td>"+pill(plan.status)+
+            (fresh?"":" <span class='pill danger'>Stale</span>")+
+            (feasible?"":" <span class='pill warning'>Shortage</span>")+"</td><td>"+
+            (plan.status==="Approved"?"<span class='data-muted'>"+h(plan.approvedBy)+"</span>":
+            "<button class='button tiny secondary' data-action='approve-workstation' data-id='"+h(plan.id)+"' "+
+            (!fresh||!feasible||!baseline||released?"disabled":"")+">IE duyệt</button>")+"</td></tr>";
+        }).join("")+"</tbody></table></div>")+"</div>";
+}
+
 function costTab() {
   const d=state.detail,s=d.style,dis=active()?"":"disabled";
   const approvedCosts=d.costs.filter(x=>x.isApproved && x.bomRevision===s.bomRevision && x.routingRevision===s.routingRevision);
@@ -516,6 +614,41 @@ async function handleAction(el) {
   if(action==="select-style"){state.tab="overview";await openStyle(el.dataset.id);return;}
   if(action==="tab"){if(!d)return;state.tab=el.dataset.tab;renderDetail();return;}
   if(!d) throw new Error("Chọn mã hàng trước.");
+  if(action==="preview-workstation"){
+    const form=$("workstationForm");
+    const selected=state.lines.find(x=>x.id===state.selectedLineId)||state.lines[0];
+    if(!selected)throw new Error("Chưa có chuyền may.");
+    const targetDailyQuantity=Number(form.elements.namedItem("targetDailyQuantity").value);
+    const minimumSkillLevel=Number(form.elements.namedItem("minimumSkillLevel").value);
+    const result=await api("/api/styles/"+id+"/workstation-plans/preview",{
+      method:"POST",body:JSON.stringify({
+        productionLineId:selected.id,targetDailyQuantity,minimumSkillLevel
+      })
+    });
+    state.planTargetQty=targetDailyQuantity;state.wsSkillLevel=minimumSkillLevel;
+    state.workstationPreview={lineId:selected.id,result};
+    renderDetail();notify("Đã mô phỏng workstation và skill matching.");return;
+  }
+  if(action==="approve-workstation"){
+    await mutation("/api/workstation-plans/"+el.dataset.id+"/approve","POST",{
+      approvedBy:actor()
+    });
+    notify("Đã IE phê duyệt Workstation Plan.");return;
+  }
+  if(action==="edit-operator"){
+    const person=state.workers.find(x=>x.id===el.dataset.id);
+    if(!person)throw new Error("Không tìm thấy hồ sơ.");
+    const existing=person.skills.map(x=>x.machineType+":"+x.level).join(",");
+    const edited=window.prompt("Cập nhật tay nghề MACHINE:LEVEL, ngăn cách dấu phẩy:",existing);
+    if(edited===null)return;
+    const skills=skillList(edited);
+    const isActive=window.confirm("Nhấn OK nếu công nhân đang active; Cancel để đặt inactive.");
+    await mutation("/api/operators/"+person.id,"PUT",{
+      displayName:person.displayName,isActive,skills
+    });
+    state.workstationPreview=null;
+    notify("Đã cập nhật kỹ năng; các plan trước đó phải được duyệt lại.");return;
+  }
   if(action==="add-machine-row"){
     document.querySelector("#machineTable tbody").insertAdjacentHTML("beforeend",machineRow());return;
   }
@@ -591,6 +724,28 @@ async function handleSubmit(form) {
     await reload();notify("Đã tạo mã hàng "+style.code+".");return;
   }
   if(!id)throw new Error("Chọn mã hàng trước khi thao tác.");
+  if(name==="operatorForm"){
+    const selected=state.lines.find(x=>x.id===state.selectedLineId)||state.lines[0];
+    if(!selected)throw new Error("Chưa có chuyền.");
+    await mutation("/api/lines/"+selected.id+"/operators","POST",{
+      employeeCode:fields.employeeCode,displayName:fields.displayName,
+      skills:skillList(fields.skillsText)
+    });
+    state.workstationPreview=null;
+    notify("Đã thêm công nhân; cần tạo lại line/workstation plans.");return;
+  }
+  if(name==="workstationForm"){
+    const selected=state.lines.find(x=>x.id===state.selectedLineId)||state.lines[0];
+    if(!selected)throw new Error("Chưa có chuyền.");
+    const targetDailyQuantity=Number(fields.targetDailyQuantity);
+    const minimumSkillLevel=Number(fields.minimumSkillLevel);
+    state.planTargetQty=targetDailyQuantity;state.wsSkillLevel=minimumSkillLevel;
+    await mutation("/api/styles/"+id+"/workstation-plans","POST",{
+      productionLineId:selected.id,targetDailyQuantity,minimumSkillLevel
+    });
+    state.workstationPreview=null;
+    notify("Workstation Plan đã lưu, cần IE phê duyệt sau khi có line baseline tương ứng.");return;
+  }
   if(name==="lineForm"){
     const line=await api("/api/lines",{method:"POST",body:JSON.stringify({
       code:fields.code,name:fields.name,factoryCode:fields.factoryCode,
@@ -699,10 +854,13 @@ document.addEventListener("submit",async(event)=>{
 });
 $("styleSearch").addEventListener("input",event=>{state.query=event.target.value;renderStyles();});
 document.addEventListener("change",event=>{
-  if(event.target?.id==="lineSelector"){
+  if(event.target?.id==="lineSelector" || event.target?.id==="wsLineSelector"){
     state.selectedLineId=event.target.value;
-    state.linePreview=null;
-    renderDetail();
+    state.linePreview=null;state.workstationPreview=null;
+    const lineId=state.selectedLineId;
+    api("/api/lines/"+lineId+"/operators").then(people=>{
+      if(state.selectedLineId===lineId){state.workers=people;renderDetail();}
+    }).catch(error=>notify(error.message,true));
   }
 });
 $("actor").value=sessionStorage.getItem("gsp_actor") || "";
