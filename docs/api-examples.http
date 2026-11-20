@@ -7,6 +7,9 @@
 @linePlanId = REPLACE_WITH_PLAN_ID
 @workstationPlanId = REPLACE_WITH_WORKSTATION_PLAN_ID
 @operatorId = REPLACE_WITH_OPERATOR_ID
+@materialReviewId = REPLACE_WITH_MATERIAL_REVIEW_ID
+@scheduleId = REPLACE_WITH_SCHEDULE_ID
+@releaseId = REPLACE_WITH_RELEASE_ID
 @standardId1 = REPLACE_WITH_STANDARD_1_ID
 @standardId2 = REPLACE_WITH_STANDARD_2_ID
 
@@ -174,6 +177,33 @@ Content-Type: application/json
 
 {"verified":true,"verifiedBy":"Technical Lead","notes":"Version A signed"}
 
+### Material coverage for 1000 pieces using approved BOM
+POST {{base}}/api/styles/{{styleId}}/material-reviews
+Content-Type: application/json
+
+{"orderQuantity":1000,"sourceReference":"PPC-STOCK-2027-001","available":[{"materialCode":"FAB-001","unit":"m","availableQuantity":1500}]}
+
+### Confirm only when no shortages (MANUAL PPC, not ERP inventory verification)
+POST {{base}}/api/material-reviews/{{materialReviewId}}/confirm
+Content-Type: application/json
+
+{"confirmedBy":"PPC Lead"}
+
+### List full material requirements, availability and shortages
+GET {{base}}/api/styles/{{styleId}}/material-reviews
+
+### Create PPC schedule referencing current approved workstation plan
+POST {{base}}/api/styles/{{styleId}}/schedules
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","workstationPlanId":"REPLACE_WITH_WORKSTATION_PLAN_ID","orderQuantity":1000,"targetDailyQuantity":100,"plannedStartDate":"2027-01-15","sourceReference":"PPC-PLAN-2027-001"}
+
+### Confirm PPC schedule (MANUAL, not APS verification)
+POST {{base}}/api/schedules/{{scheduleId}}/confirm
+Content-Type: application/json
+
+{"confirmedBy":"PPC Planner"}
+
 ### Check gate
 GET {{base}}/api/styles/{{styleId}}/readiness
 
@@ -182,3 +212,6 @@ POST {{base}}/api/styles/{{styleId}}/release
 Content-Type: application/json
 
 {"lineCode":"A01","plannedStartDate":"2027-01-15","approvedBy":"Production Manager"}
+
+### Retrieve stored handover payload after Release, no automatic ERP/MES delivery
+GET {{base}}/api/releases/{{releaseId}}/handover
