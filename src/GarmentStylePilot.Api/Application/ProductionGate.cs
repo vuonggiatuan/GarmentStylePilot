@@ -1,0 +1,56 @@
+using GarmentStylePilot.Api.Domain;
+
+namespace GarmentStylePilot.Api.Application;
+
+public static class ReadinessCodes
+{
+    public static readonly string[] Required =
+    [
+        "TechPackApproved",
+        "MaterialAvailable",
+        "CapacityConfirmed",
+        "LineBalanceApproved",
+        "PpMeetingCompleted",
+        "PilotRunApproved",
+        "QualityPlanApproved",
+        "MachineReady"
+    ];
+}
+
+public static class ProductionGate
+{
+    public static IReadOnlyList<string> Evaluate(
+        Style style, IReadOnlyCollection<Sample> samples, IReadOnlyCollection<BomLine> bom,
+        IReadOnlyCollection<SewingOperation> operations, IReadOnlyCollection<CostSheet> costs,
+        IReadOnlyCollection<Quote> quotes, IReadOnlyCollection<ReadinessCheck> checks)
+    {
+        var blockers = new List<string>();
+        if (style.Status == StyleStatus.Released)
+            blockers.Add("Style has already been released.");
+        if (!samples.Any(x => x.Status == SampleStatus.Approved))
+            blockers.Add("Sample approval missing.");
+        if (bom.Count == 0 || bom.Any(x => x.Consumption <= 0 || x.UnitPrice < 0))
+            blockers.Add("Complete BOM with valid consumption and prices required.");
+        if (style.ApprovedBomRevision != style.BomRevision || style.BomRevision == 0)
+            blockers.Add("Current BOM revision is not approved.");
+        if (operations.Count == 0 || operations.Any(x => x.SmvMinutes <= 0))
+            blockers.Add("Validated GST/SMV operations required.");
+        if (style.ApprovedRoutingRevision != style.RoutingRevision || style.RoutingRevision == 0)
+            blockers.Add("Current IE routing/SMV revision is not approved.");
+
+        var currentCosts = costs.Where(x => x.IsApproved
+            && x.BomRevision == style.BomRevision
+            && x.RoutingRevision == style.RoutingRevision).ToArray();
+        if (currentCosts.Length == 0)
+            blockers.Add("Approved costing for current BOM/routing revision required.");
+        if (!quotes.Any(x => x.Status == QuoteStatus.Accepted
+            && currentCosts.Any(c => c.Id == x.CostSheetId)))
+            blockers.Add("Customer-accepted quote linked to current approved costing required.");
+
+        foreach (var code in ReadinessCodes.Required)
+            if (!checks.Any(x => x.Code == code && x.Verified))
+                blockers.Add("Readiness check missing: " + code);
+
+        return blockers;
+    }
+}
