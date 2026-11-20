@@ -1,5 +1,7 @@
 // GarmentStylePilot operational MVP (browser-only UI; permissions are enforced server-side).
-const state = { styles: [], stats: null, detail: null, readiness: null, codes: [], selectedId: null, tab: "overview", query: "" };
+const state = { styles: [], stats: null, detail: null, readiness: null, codes: [], lines: [], plans: [],
+  selectedId: null, selectedLineId: null, tab: "overview", query: "",
+  planTargetQty: 100, linePreview: null, expandedPlan: null };
 const $ = (id) => document.getElementById(id);
 const h = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n, digits = 2) => Number(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -48,10 +50,10 @@ async function api(path, options = {}) {
   return data;
 }
 async function reload() {
-  const [stats, styles, codes] = await Promise.all([
-    api("/api/dashboard"), api("/api/styles"), api("/api/readiness-codes")
+  const [stats, styles, codes, lines] = await Promise.all([
+    api("/api/dashboard"), api("/api/styles"), api("/api/readiness-codes"), api("/api/lines")
   ]);
-  state.stats = stats; state.styles = styles; state.codes = codes;
+  state.stats = stats; state.styles = styles; state.codes = codes; state.lines = lines;
   renderSummary(); renderStyles();
   if (state.selectedId) await openStyle(state.selectedId, false);
   $("lastUpdated").textContent = "Đồng bộ lúc " + new Date().toLocaleTimeString("vi-VN");
@@ -59,10 +61,11 @@ async function reload() {
 async function openStyle(id, updateList = true) {
   state.selectedId = id;
   try {
-    const [detail, readiness] = await Promise.all([
-      api("/api/styles/" + id), api("/api/styles/" + id + "/readiness")
+    const [detail, readiness, plans] = await Promise.all([
+      api("/api/styles/" + id), api("/api/styles/" + id + "/readiness"),
+      api("/api/styles/" + id + "/line-plans")
     ]);
-    state.detail = detail; state.readiness = readiness;
+    state.detail = detail; state.readiness = readiness; state.plans = plans;
     renderDetail();
     if (updateList) renderStyles();
   } catch (error) {
@@ -104,7 +107,8 @@ function renderDetail() {
   const d = state.detail, s = d.style;
   const tabs = [
     ["overview", "Tổng quan"], ["sample", "Sample"], ["bom", "BOM"],
-    ["ie", "IE · GST/SMV"], ["cost", "Costing & Quote"], ["readiness", "Line Readiness"]
+    ["ie", "IE · GST/SMV"], ["line", "Line Planning"],
+    ["cost", "Costing & Quote"], ["readiness", "Line Readiness"]
   ];
   $("detailPanel").innerHTML =
     "<div class='detail-head'><div><span class='eyebrow'>STYLE / " + h(s.customer) +
@@ -124,6 +128,7 @@ function renderTab() {
     case "sample": return sampleTab();
     case "bom": return bomTab();
     case "ie": return ieTab();
+    case "line": return lineTab();
     case "cost": return costTab();
     case "readiness": return readinessTab();
     default: return overviewTab();
@@ -135,13 +140,20 @@ function overviewTab() {
   const accepted=d.quotes.find(q=>q.status==="Accepted" && d.costs.some(c=>c.id===q.costSheetId && c.isApproved && c.bomRevision===s.bomRevision && c.routingRevision===s.routingRevision));
   const official = d.operations.reduce((a, o)=>a+Number(o.smvMinutes),0);
   const latest = d.smvEstimates[0];
+  const balanced = state.plans.some(({plan}) => {
+    const line = state.lines.find(x=>x.id===plan.productionLineId);
+    return line && line.isActive && line.capacityRevision===plan.lineCapacityRevision &&
+      plan.routingRevision===s.routingRevision && plan.status==="Approved" &&
+      plan.laborFeasible && plan.machineFeasible;
+  });
   const steps = [
     ["01", "Sample", d.samples.some(x=>x.status==="Approved"), "Fit / PP Sample approval"],
     ["02", "BOM", s.bomRevision>0 && s.bomRevision===s.approvedBomRevision, "Material consumption revision " + s.bomRevision],
     ["03", "IE Routing", s.routingRevision>0 && s.routingRevision===s.approvedRoutingRevision, "Official SMV " + fmt(official) + " min"],
-    ["04", "Costing", !!currentCost, "Approved cost sheet"],
-    ["05", "Quotation", !!accepted, "Customer-accepted quote"],
-    ["06", "Line Readiness", state.readiness.ready || s.status==="Released", "8 production checkpoints"]
+    ["04", "Line Planning", balanced, "Feasible IE-approved line staffing and machine capacity"],
+    ["05", "Costing", !!currentCost, "Approved cost sheet"],
+    ["06", "Quotation", !!accepted, "Customer-accepted quote"],
+    ["07", "Line Readiness", state.readiness.ready || s.status==="Released", "8 production checkpoints"]
   ];
   return "<h4 class='work-title'>Trạng thái mã hàng</h4>" +
     "<p class='work-desc'>Một mã hàng chỉ được bàn giao lên chuyền khi toàn bộ phê duyệt và điều kiện sản xuất đáp ứng yêu cầu.</p>" +
@@ -262,6 +274,99 @@ function ieTab() {
     d.smvEstimates.map(x=>"<tr><td>"+h(x.modelVersion)+"</td><td>"+h(x.predictedOperationCount)+"</td><td>"+fmt(x.predictedSmvMinutes)+"</td><td>"+dateText(x.createdAtUtc)+"</td></tr>").join("")+
     "</tbody></table></div>" : "");
 }
+
+function machineRow(machine={}) {
+  return "<tr><td><input name='machineType' required placeholder='Overlock' value='" + h(machine.machineType||"") +
+    "'></td><td><input name='availableCount' required type='number' min='0' step='1' value='" +
+    h(machine.availableCount??0) + "'></td><td><button class='button tiny danger' type='button' data-action='remove-row'>×</button></td></tr>";
+}
+function lineTab() {
+  const d=state.detail, s=d.style, locked=!active(), lines=state.lines;
+  const current=lines.find(x=>x.id===state.selectedLineId) || lines[0];
+  if(current && !state.selectedLineId)state.selectedLineId=current.id;
+  const machines=current?.machines||[];
+  const planItems=state.plans;
+  const preview=state.linePreview && state.linePreview.lineId===current?.id ? state.linePreview.result : null;
+  const expanded=planItems.find(x=>x.plan.id===state.expandedPlan);
+  return "<h4 class='work-title'>Production Engineering · Line Capacity Planning</h4>" +
+    "<p class='work-desc'>Kế hoạch công đoạn theo SMV chính thức, số người và loại máy của chuyền. Mô hình phân bổ riêng theo công đoạn mang tính bảo thủ, không thay thế tối ưu hóa IE thực địa.</p>" +
+    "<div class='two-col'><div class='section-card'><h4>Thiết lập chuyền sản xuất</h4>" +
+    "<form id='lineForm'><div class='two-col'>" +
+    "<label class='field'>Mã chuyền<input name='code' placeholder='A01' required></label>" +
+    "<label class='field'>Nhà máy<input name='factoryCode' placeholder='MY-PHUOC' required></label>" +
+    "<label class='field'>Tên chuyền<input name='name' placeholder='Sewing Line A01' required></label>" +
+    "<label class='field'>Số người tối đa<input name='maximumOperators' type='number' min='1' max='5000' value='20' required></label>" +
+    "<label class='field'>Phút / ca<input name='shiftMinutes' type='number' min='60' max='1440' value='480' required></label>" +
+    "<label class='field'>Hiệu suất dự kiến (%)<input name='plannedEfficiencyPercent' type='number' min='0.1' max='100' step='any' value='85' required></label>" +
+    "</div><div class='flex' style='margin-top:12px'><button class='button primary' type='submit'>+ Tạo chuyền</button></div></form>" +
+    "<p>Chuyền tạo mới phải được khai báo số lượng máy trước khi đánh giá năng lực.</p></div>" +
+    "<div class='section-card'><h4>Cấu hình năng lực chuyền</h4>" +
+    (lines.length ?
+      "<label class='field'>Chọn chuyền<select id='lineSelector'>" +
+        lines.map(line=>"<option value='"+h(line.id)+"' "+(line.id===current?.id?"selected":"")+">"+
+          h(line.factoryCode)+" / "+h(line.code)+" ("+h(line.maximumOperators)+" người)"+(line.isActive?"":" [Inactive]")+
+          "</option>").join("")+"</select></label>" +
+      "<div class='meta-grid'><div class='meta-card'><span>Capacity rev</span><strong>R"+h(current.capacityRevision)+"</strong></div>"+
+      "<div class='meta-card'><span>Nhân lực</span><strong>"+h(current.maximumOperators)+"</strong></div>"+
+      "<div class='meta-card'><span>Efficiency</span><strong>"+fmt(current.plannedEfficiencyPercent,1)+"%</strong></div></div>" +
+      "<form id='machineForm'><div class='table-wrap'><table id='machineTable'><thead><tr><th>Loại máy</th><th>Số lượng</th><th></th></tr></thead><tbody>" +
+        (machines.length?machines.map(machineRow).join(""):machineRow())+
+      "</tbody></table></div><div class='flex' style='margin-top:11px'><button type='button' class='button ghost' data-action='add-machine-row'>+ Máy</button>" +
+      "<button class='button secondary push'>Lưu cấu hình máy</button></div></form>" +
+      "<p>Thay đổi công suất máy tăng revision, làm kế hoạch duyệt cũ không còn hiệu lực.</p>"
+      : "<p>Chưa có chuyền. Tạo chuyền bên trái trước khi lập kế hoạch.</p>") +
+    "</div></div>" +
+    "<div class='section-card'><h4>Mô phỏng phân bổ nhân sự và máy</h4>" +
+    (!current?"<div class='alert warning'>Tạo chuyền trước.</div>":
+      (!s.routingRevision||s.routingRevision!==s.approvedRoutingRevision?
+        "<div class='alert warning'>Chỉ mô phỏng sau khi IE duyệt routing / SMV chính thức.</div>":"")+
+      "<form id='linePlanForm' class='form-row'><label>Chuyền mục tiêu<input value='"+h(current.code)+"' disabled></label>"+
+      "<label>Số lượng / ngày<input type='number' name='targetDailyQuantity' min='1' max='200000' value='"+h(state.planTargetQty)+"' required></label>"+
+      "<button type='button' class='button secondary' data-action='preview-plan' "+(locked?"disabled":"")+">Mô phỏng</button>"+
+      "<button class='button primary' "+(locked?"disabled":"")+">Lưu kế hoạch</button></form>") +
+    (preview ? "<div class='meta-grid'><div class='meta-card'><span>SMV tổng (IE)</span><strong>"+
+      fmt(preview.calculation.totalSmvMinutes)+"</strong></div><div class='meta-card'><span>Operators required</span><strong>"+
+      h(preview.calculation.requiredOperators)+" / "+h(preview.calculation.availableOperators)+
+      "</strong></div><div class='meta-card'><span>Daily bottleneck capacity</span><strong>"+
+      h(preview.calculation.estimatedDailyCapacity)+"</strong></div></div>"+
+      "<div class='alert "+(preview.calculation.canMeetTarget?"success":"danger")+"'>"+
+      (preview.calculation.canMeetTarget?"Công suất dự kiến đáp ứng mục tiêu.":"Không đủ nhân lực hoặc máy cho mục tiêu hiện tại.")+
+      (preview.calculation.machineShortfalls.length ?
+      "<ul>"+preview.calculation.machineShortfalls.map(x=>"<li>"+h(x.machineType)+": "+h(x.required)+
+      " cần / "+h(x.available)+" hiện có</li>").join("")+"</ul>":"")+"</div>"+
+      "<div class='table-wrap'><table><thead><tr><th>STT</th><th>Công đoạn</th><th>Máy</th><th>SMV</th><th>Người cần</th><th>Output/day</th></tr></thead><tbody>"+
+      preview.calculation.assignments.map(x=>"<tr><td>"+h(x.sequenceNo)+"</td><td>"+h(x.operationName)+"</td><td>"+
+        h(x.machineType)+"</td><td>"+fmt(x.smvMinutes)+"</td><td>"+h(x.requiredOperators)+
+        "</td><td>"+h(x.estimatedDailyCapacity)+"</td></tr>").join("")+
+      "</tbody></table></div>" : "")+
+    "</div>"+
+    "<div class='section-card'><h4>Lịch sử kế hoạch chuyền ("+planItems.length+")</h4>" +
+    (!planItems.length?"<p>Chưa lưu kế hoạch chuyền.</p>":
+      "<div class='table-wrap'><table><thead><tr><th>Chuyền</th><th>IE Rev / Line Rev</th><th>Target</th><th>Staff</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>"+
+      planItems.map(({plan})=>{
+        const line=lines.find(x=>x.id===plan.productionLineId);
+        const currentPlan=!!line && line.isActive &&
+          line.capacityRevision===plan.lineCapacityRevision &&
+          s.routingRevision===plan.routingRevision;
+        const feasible=plan.laborFeasible&&plan.machineFeasible;
+        return "<tr><td>"+h(line?.code||"Unknown")+"</td><td>R"+h(plan.routingRevision)+
+          " / R"+h(plan.lineCapacityRevision)+"</td><td>"+h(plan.targetDailyQuantity)+
+          "</td><td>"+h(plan.requiredOperators)+" / "+h(plan.availableOperators)+"</td><td>"+
+          pill(plan.status)+(currentPlan?"":" <span class='pill danger'>Stale</span>")+
+          (!feasible?" <span class='pill warning'>Insufficient</span>":"")+"</td><td>"+
+          "<button class='button tiny ghost' data-action='expand-plan' data-id='"+h(plan.id)+"'>Chi tiết</button> "+
+          (plan.status==="Approved"?"":"<button class='button tiny secondary' data-action='approve-plan' data-id='"+h(plan.id)+"' "+
+          ((!feasible||!currentPlan||locked)?"disabled":"")+">IE duyệt</button>")+
+          "</td></tr>";
+      }).join("")+"</tbody></table></div>")+
+    (expanded?"<div class='rule'></div><strong>Chi tiết kế hoạch · "+h(expanded.plan.targetDailyQuantity)+" sp/ngày</strong>"+
+      "<div class='table-wrap'><table><thead><tr><th>Seq</th><th>Operation</th><th>Máy</th><th>SMV</th><th>Operators</th><th>Output</th></tr></thead><tbody>"+
+      expanded.assignments.map(x=>"<tr><td>"+h(x.sequenceNo)+"</td><td>"+h(x.operationName)+"</td><td>"+
+        h(x.machineType)+"</td><td>"+fmt(x.smvMinutes)+"</td><td>"+h(x.requiredOperators)+
+        "</td><td>"+h(x.estimatedDailyCapacity)+"</td></tr>").join("")+"</tbody></table></div>":"")+
+    "</div>";
+}
+
 function costTab() {
   const d=state.detail,s=d.style,dis=active()?"":"disabled";
   const approvedCosts=d.costs.filter(x=>x.isApproved && x.bomRevision===s.bomRevision && x.routingRevision===s.routingRevision);
@@ -297,6 +402,10 @@ function costTab() {
 }
 function readinessTab() {
   const d=state.detail, s=d.style, ready=state.readiness.ready, released=s.status==="Released", dis=active()?"":"disabled";
+  const validLines=state.lines.filter(line => line.isActive && state.plans.some(({plan})=>
+    plan.productionLineId===line.id && plan.lineCapacityRevision===line.capacityRevision &&
+    plan.routingRevision===s.routingRevision && plan.status==="Approved" &&
+    plan.laborFeasible && plan.machineFeasible));
   const checkMap=new Map(d.checks.map(x=>[x.code,x]));
   return "<h4 class='work-title'>Production Readiness Gate</h4><p class='work-desc'>Kiểm tra 8 điều kiện tiền sản xuất trước khi phát hành mã hàng sang chuyền.</p>" +
   (released ?
@@ -318,9 +427,12 @@ function readinessTab() {
   }).join("")+"</div>"+
   "<div class='section-card' style='margin-top:17px'><h4>Production Release</h4>"+
   "<p>Phát hành chỉ khi tất cả dữ liệu được phê duyệt. Đây là bước bàn giao sang PPC/MES, chưa phải tự động tạo lệnh sản xuất.</p>"+
-  "<form id='releaseForm' class='form-row'><label>Chuyền may<input name='lineCode' placeholder='A01' required></label>"+
+  "<form id='releaseForm' class='form-row'><label>Chuyền may<select name='lineCode' required>"+
+  (validLines.length ? validLines.map(line=>"<option value='"+h(line.code)+"'>"+h(line.code)+" · "+h(line.factoryCode)+"</option>").join("") :
+  "<option value=''>Chưa có line balance plan được duyệt</option>")+
+  "</select></label>"+
   "<label>Ngày dự kiến lên chuyền<input type='date' name='plannedStartDate' required></label>"+
-  "<button class='button primary' "+(!ready||released?"disabled":"")+">✓ Release to Production</button></form>"+
+  "<button class='button primary' "+(!ready||released||!validLines.length?"disabled":"")+">✓ Release to Production</button></form>"+
   "<div class='hint' style='margin-top:12px'>MVP: checklist dùng xác nhận bằng tên nhập tay, chưa có workflow role-based hay tài liệu chứng cứ đính kèm.</div></div>";
 }
 function rowData(tr, keys, numerics=[]) {
@@ -355,6 +467,29 @@ async function handleAction(el) {
   if(action==="select-style"){state.tab="overview";await openStyle(el.dataset.id);return;}
   if(action==="tab"){if(!d)return;state.tab=el.dataset.tab;renderDetail();return;}
   if(!d) throw new Error("Chọn mã hàng trước.");
+  if(action==="add-machine-row"){
+    document.querySelector("#machineTable tbody").insertAdjacentHTML("beforeend",machineRow());return;
+  }
+  if(action==="preview-plan"){
+    const form=$("linePlanForm");
+    const target=Number(form.elements.namedItem("targetDailyQuantity").value);
+    const line=state.lines.find(x=>x.id===state.selectedLineId) || state.lines[0];
+    if(!line)throw new Error("Chưa cấu hình chuyền may.");
+    const result=await api("/api/styles/"+id+"/line-plans/preview",{
+      method:"POST",body:JSON.stringify({productionLineId:line.id,targetDailyQuantity:target})
+    });
+    state.planTargetQty=target;
+    state.linePreview={lineId:line.id,result};
+    renderDetail();notify("Đã tính xong đề xuất phân bổ IE.");return;
+  }
+  if(action==="approve-plan"){
+    await mutation("/api/line-plans/"+el.dataset.id+"/approve","POST",{approvedBy:actor()});
+    notify("Đã phê duyệt kế hoạch chuyền.");return;
+  }
+  if(action==="expand-plan"){
+    state.expandedPlan=state.expandedPlan===el.dataset.id?null:el.dataset.id;
+    renderDetail();return;
+  }
   if(action==="add-bom-row") {document.querySelector("#bomTable tbody").insertAdjacentHTML("beforeend",bomRow());return;}
   if(action==="add-op-row"){
     const body=document.querySelector("#operationTable tbody");
@@ -407,6 +542,36 @@ async function handleSubmit(form) {
     await reload();notify("Đã tạo mã hàng "+style.code+".");return;
   }
   if(!id)throw new Error("Chọn mã hàng trước khi thao tác.");
+  if(name==="lineForm"){
+    const line=await api("/api/lines",{method:"POST",body:JSON.stringify({
+      code:fields.code,name:fields.name,factoryCode:fields.factoryCode,
+      maximumOperators:Number(fields.maximumOperators),
+      shiftMinutes:Number(fields.shiftMinutes),
+      plannedEfficiencyPercent:Number(fields.plannedEfficiencyPercent)
+    })});
+    state.selectedLineId=line.id;state.linePreview=null;
+    await reload();notify("Đã tạo chuyền "+line.code+". Khai báo máy trước khi mô phỏng.");return;
+  }
+  if(name==="machineForm"){
+    const line=state.lines.find(x=>x.id===state.selectedLineId) || state.lines[0];
+    if(!line)throw new Error("Chưa có chuyền.");
+    const rows=[...form.querySelectorAll("tbody tr")].map(tr=>
+      rowData(tr,["machineType","availableCount"],["availableCount"]));
+    if(!window.confirm("Đổi cấu hình máy làm các line balance plan của chuyền hết hiệu lực. Tiếp tục?"))return;
+    await mutation("/api/lines/"+line.id+"/machines","PUT",rows);
+    state.linePreview=null;notify("Đã lưu cấu hình máy, cần duyệt lại kế hoạch chuyền.");return;
+  }
+  if(name==="linePlanForm"){
+    const line=state.lines.find(x=>x.id===state.selectedLineId) || state.lines[0];
+    if(!line)throw new Error("Chưa có chuyền.");
+    const targetDailyQuantity=Number(fields.targetDailyQuantity);
+    state.planTargetQty=targetDailyQuantity;
+    await mutation("/api/styles/"+id+"/line-plans","POST",{
+      productionLineId:line.id,targetDailyQuantity
+    });
+    state.linePreview=null;renderDetail();
+    notify("Đã lưu kế hoạch chuyền mới; cần IE phê duyệt nếu đạt yêu cầu.");return;
+  }
   if(name==="sampleForm"){
     await mutation("/api/styles/"+id+"/samples","POST",fields);notify("Đã thêm mẫu.");return;
   }
@@ -466,6 +631,13 @@ document.addEventListener("submit",async(event)=>{
   finally{if(submit && submit.isConnected)submit.disabled=false;}
 });
 $("styleSearch").addEventListener("input",event=>{state.query=event.target.value;renderStyles();});
+document.addEventListener("change",event=>{
+  if(event.target?.id==="lineSelector"){
+    state.selectedLineId=event.target.value;
+    state.linePreview=null;
+    renderDetail();
+  }
+});
 $("actor").value=sessionStorage.getItem("gsp_actor") || "";
 $("actor").addEventListener("input",event=>sessionStorage.setItem("gsp_actor",event.target.value));
 reload().catch(error=>notify(error.message,true));
