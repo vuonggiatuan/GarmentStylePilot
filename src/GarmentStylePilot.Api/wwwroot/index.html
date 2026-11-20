@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#122e41">
+  <meta name="description" content="GarmentStylePilot - Apparel development, industrial engineering and production readiness">
+  <title>GarmentStylePilot — Product Development Workspace</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div><strong>Garment<span>StylePilot</span></strong><small>APPAREL OPERATIONS</small></div>
+      </div>
+      <div class="nav-heading">WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <button class="nav-item active" data-action="jump" data-target="overview"><span class="nav-icon">◫</span> Tổng quan</button>
+        <button class="nav-item" data-action="jump" data-target="style-section"><span class="nav-icon">▤</span> Phát triển mã hàng</button>
+        <button class="nav-item" data-action="jump" data-target="style-section" data-tab="line"><span class="nav-icon">▦</span> Line Planning</button>
+        <button class="nav-item" data-action="jump" data-target="style-section" data-tab="workstations"><span class="nav-icon">♙</span> Workstation Skills</button>
+        <button class="nav-item" data-action="jump" data-target="style-section" data-tab="handover"><span class="nav-icon">▥</span> PPC Handover</button>
+        <button class="nav-item" data-action="jump" data-target="style-section" data-tab="readiness"><span class="nav-icon">✓</span> Production Readiness</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="side-kicker">PROCESS FRAMEWORK</div>
+        <p>Sample → IE → Costing → Line Release</p>
+        <div class="side-separator"></div>
+        <span class="env-label"><span class="status-dot"></span> MVP / Development</span>
+      </div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div><span class="eyebrow">Garment Engineering Platform</span><h1>Product Development</h1></div>
+        <div class="topbar-actions">
+          <label class="actor-field">Người thao tác <input id="actor" autocomplete="name" placeholder="Nhập tên (MVP)" aria-label="Người thao tác; chưa xác thực danh tính"></label>
+          <button class="button ghost" data-action="api-key" title="Cấu hình API key cho môi trường demo có bảo vệ API">API Key</button>
+          <button class="button primary" data-action="new-style">+ Tạo mã hàng</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="overview" aria-label="Summary" class="overview">
+          <div class="section-heading"><div><span class="eyebrow">WORKSPACE OVERVIEW</span><h2>Toàn bộ vòng đời trước sản xuất</h2></div><span class="subtle" id="lastUpdated"></span></div>
+          <div id="summary" class="stat-grid">
+            <div class="stat-card"><div class="skeleton"></div></div>
+            <div class="stat-card"><div class="skeleton"></div></div>
+            <div class="stat-card"><div class="skeleton"></div></div>
+            <div class="stat-card"><div class="skeleton"></div></div>
+          </div>
+          <div class="milestones" aria-label="Business stages">
+            <div><span class="milestone-no">01</span><strong>Sample</strong><small>Tech Pack · Fit</small></div>
+            <span class="milestone-arrow">→</span>
+            <div><span class="milestone-no">02</span><strong>IE Engineering</strong><small>Routing · SMV</small></div>
+            <span class="milestone-arrow">→</span>
+            <div><span class="milestone-no">03</span><strong>Cost & Quote</strong><small>BOM · CM · FOB</small></div>
+            <span class="milestone-arrow">→</span>
+            <div><span class="milestone-no">04</span><strong>Line Readiness</strong><small>PP · Pilot · Release</small></div>
+          </div>
+        </section>
+        <section id="style-section" class="content-section" aria-label="Style workspace">
+          <div class="section-heading"><div><span class="eyebrow">STYLE WORKSPACE</span><h2>Mã hàng &amp; kỹ thuật sản xuất</h2></div></div>
+          <div class="workspace-grid">
+            <div class="styles-panel panel">
+              <div class="panel-heading"><strong>Danh sách mã hàng</strong><span id="styleCount" class="count-pill">0</span></div>
+              <label class="search-field"><span aria-hidden="true">⌕</span><input id="styleSearch" placeholder="Tìm theo mã, khách hàng..." aria-label="Tìm mã hàng"></label>
+              <div id="styleList" class="style-list" aria-live="polite"><div class="empty">Đang tải...</div></div>
+            </div>
+            <div class="detail-panel panel" id="detailPanel" aria-live="polite">
+              <div class="empty-workspace"><div class="empty-graphic">▤</div><h3>Chọn một mã hàng để bắt đầu</h3><p>Quản lý Sample, BOM, GST/SMV, Costing và Production Readiness trong một nơi.</p><button class="button primary" data-action="new-style">Tạo mã hàng đầu tiên</button></div>
+            </div>
+          </div>
+        </section>
+        <footer>GarmentStylePilot · Prototype · Các phê duyệt hiện dùng tên nhập tay, chưa thay thế hệ thống IAM/SSO doanh nghiệp.</footer>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="styleDialog" aria-labelledby="dialogTitle">
+    <form id="createStyleForm">
+      <div class="dialog-header"><div><span class="eyebrow">NEW APPAREL STYLE</span><h2 id="dialogTitle">Tạo mã hàng</h2></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="Đóng">×</button></div>
+      <label>Mã hàng <input name="code" placeholder="VD: ST-2027-001" maxlength="64" required></label>
+      <label>Khách hàng <input name="customer" placeholder="Brand / Customer" maxlength="100" required></label>
+      <label>Mô tả <textarea name="description" rows="3" placeholder="Loại sản phẩm, nhóm hàng..."></textarea></label>
+      <label>Đơn vị tiền tệ <select name="currency"><option value="USD">USD</option><option value="TWD">TWD</option><option value="VND">VND</option></select></label>
+      <div class="dialog-actions"><button type="button" class="button ghost" data-action="close-dialog">Hủy</button><button type="submit" class="button primary">Tạo mã hàng</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

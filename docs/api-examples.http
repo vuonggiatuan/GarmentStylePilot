@@ -1,0 +1,217 @@
+@base = http://localhost:5090
+@styleId = REPLACE_WITH_STYLE_ID
+@sampleId = REPLACE_WITH_SAMPLE_ID
+@costId = REPLACE_WITH_COST_ID
+@quoteId = REPLACE_WITH_QUOTE_ID
+@lineId = REPLACE_WITH_LINE_ID
+@linePlanId = REPLACE_WITH_PLAN_ID
+@workstationPlanId = REPLACE_WITH_WORKSTATION_PLAN_ID
+@operatorId = REPLACE_WITH_OPERATOR_ID
+@materialReviewId = REPLACE_WITH_MATERIAL_REVIEW_ID
+@scheduleId = REPLACE_WITH_SCHEDULE_ID
+@releaseId = REPLACE_WITH_RELEASE_ID
+@standardId1 = REPLACE_WITH_STANDARD_1_ID
+@standardId2 = REPLACE_WITH_STANDARD_2_ID
+
+### Create style
+POST {{base}}/api/styles
+Content-Type: application/json
+
+{"code":"ST-001","customer":"Demo","description":"Performance Tee","currency":"USD"}
+
+### Add sample
+POST {{base}}/api/styles/{{styleId}}/samples
+Content-Type: application/json
+
+{"sampleType":"Fit","revision":"A","notes":"Wear test"}
+
+### Approve sample
+POST {{base}}/api/samples/{{sampleId}}/approve
+Content-Type: application/json
+
+{"approvedBy":"Sample Manager"}
+
+### BOM (revision is incremented)
+PUT {{base}}/api/styles/{{styleId}}/bom
+Content-Type: application/json
+
+[{"materialCode":"FAB-001","category":"Fabric","unit":"m","consumption":1.3,"unitPrice":2.8,"wastagePercent":5}]
+
+### Operations (revision is incremented)
+PUT {{base}}/api/styles/{{styleId}}/operations
+Content-Type: application/json
+
+[{"sequenceNo":1,"name":"Join shoulder","machineType":"Overlock","smvMinutes":0.62},{"sequenceNo":2,"name":"Attach neck rib","machineType":"Coverstitch","smvMinutes":1.24}]
+
+### Create reusable IE operation standard
+POST {{base}}/api/operation-standards
+Content-Type: application/json
+
+{"code":"GST-101","componentName":"Body","operationName":"Join shoulder","machineType":"Overlock","methodCode":"IE-STD","referenceSmvMinutes":0.62}
+
+### Catalog list
+GET {{base}}/api/operation-standards
+
+### Import catalog selections into style's own new routing revision
+POST {{base}}/api/styles/{{styleId}}/operations/from-library
+Content-Type: application/json
+
+[{"sequenceNo":1,"operationStandardId":"REPLACE_WITH_STANDARD_1_ID"},{"sequenceNo":2,"operationStandardId":"REPLACE_WITH_STANDARD_2_ID"}]
+
+### Update standard only; historical style routing snapshot is unaffected
+PUT {{base}}/api/operation-standards/{{standardId1}}
+Content-Type: application/json
+
+{"componentName":"Body","operationName":"Join shoulder","machineType":"Overlock","methodCode":"IE-STD","referenceSmvMinutes":0.88,"isActive":true}
+
+### Approve BOM
+POST {{base}}/api/styles/{{styleId}}/bom/approve
+Content-Type: application/json
+
+{"approvedBy":"Materials Manager"}
+
+### Approve IE routing
+POST {{base}}/api/styles/{{styleId}}/operations/approve
+Content-Type: application/json
+
+{"approvedBy":"IE Lead"}
+
+### Define production line (once per factory line)
+POST {{base}}/api/lines
+Content-Type: application/json
+
+{"code":"A01","name":"Sewing A01","factoryCode":"MY-PHUOC","maximumOperators":20,"shiftMinutes":480,"plannedEfficiencyPercent":85}
+
+### Configure available machines (increments line capacity revision)
+PUT {{base}}/api/lines/{{lineId}}/machines
+Content-Type: application/json
+
+[{"machineType":"OVERLOCK","availableCount":5},{"machineType":"COVERSTITCH","availableCount":5}]
+
+### Preview conservative operation staffing / machine constraints
+POST {{base}}/api/styles/{{styleId}}/line-plans/preview
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100}
+
+### Save plan snapshot
+POST {{base}}/api/styles/{{styleId}}/line-plans
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100}
+
+### IE approves feasible plan for current official routing and line revision
+POST {{base}}/api/line-plans/{{linePlanId}}/approve
+Content-Type: application/json
+
+{"approvedBy":"IE Lead"}
+
+### Register an operator with qualified machine skills (changes line revision)
+POST {{base}}/api/lines/{{lineId}}/operators
+Content-Type: application/json
+
+{"employeeCode":"OP-001","displayName":"Training Operator A","skills":[{"machineType":"OVERLOCK","level":4},{"machineType":"COVERSTITCH","level":3}]}
+
+### Register another distinct operator for coverstitch work
+POST {{base}}/api/lines/{{lineId}}/operators
+Content-Type: application/json
+
+{"employeeCode":"OP-002","displayName":"Training Operator B","skills":[{"machineType":"COVERSTITCH","level":3}]}
+
+### Fetch skill matrix
+GET {{base}}/api/lines/{{lineId}}/operators
+
+### Update operator skills (increments capacity revision)
+PUT {{base}}/api/operators/{{operatorId}}
+Content-Type: application/json
+
+{"displayName":"Training Operator A","isActive":true,"skills":[{"machineType":"OVERLOCK","level":4},{"machineType":"COVERSTITCH","level":4}]}
+
+### IMPORTANT: Recreate and approve Phase 3 line plan after any operator/skill change.
+
+### Preview skill-aware grouping
+POST {{base}}/api/styles/{{styleId}}/workstation-plans/preview
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100,"minimumSkillLevel":2}
+
+### Save WorkstationPlan snapshot
+POST {{base}}/api/styles/{{styleId}}/workstation-plans
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","targetDailyQuantity":100,"minimumSkillLevel":2}
+
+### Approve only with current matching Phase 3 baseline
+POST {{base}}/api/workstation-plans/{{workstationPlanId}}/approve
+Content-Type: application/json
+
+{"approvedBy":"IE Lead"}
+
+### List grouped station snapshots
+GET {{base}}/api/styles/{{styleId}}/workstation-plans
+
+### Calculate costing
+POST {{base}}/api/styles/{{styleId}}/costs
+Content-Type: application/json
+
+{"minuteRate":0.08,"overheadPerPiece":0.55,"targetMarginPercent":18}
+
+### Approve costing
+POST {{base}}/api/costs/{{costId}}/approve
+Content-Type: application/json
+
+{"approvedBy":"Costing Manager"}
+
+### Quote
+POST {{base}}/api/styles/{{styleId}}/quotes
+Content-Type: application/json
+
+{"costSheetId":"REPLACE_WITH_COST_ID","unitPrice":6.25}
+
+### Customer accepts quotation
+POST {{base}}/api/quotes/{{quoteId}}/accept
+
+### Verify one checklist item (repeat for all readiness codes)
+PUT {{base}}/api/styles/{{styleId}}/readiness/TechPackApproved
+Content-Type: application/json
+
+{"verified":true,"verifiedBy":"Technical Lead","notes":"Version A signed"}
+
+### Material coverage for 1000 pieces using approved BOM
+POST {{base}}/api/styles/{{styleId}}/material-reviews
+Content-Type: application/json
+
+{"orderQuantity":1000,"sourceReference":"PPC-STOCK-2027-001","available":[{"materialCode":"FAB-001","unit":"m","availableQuantity":1500}]}
+
+### Confirm only when no shortages (MANUAL PPC, not ERP inventory verification)
+POST {{base}}/api/material-reviews/{{materialReviewId}}/confirm
+Content-Type: application/json
+
+{"confirmedBy":"PPC Lead"}
+
+### List full material requirements, availability and shortages
+GET {{base}}/api/styles/{{styleId}}/material-reviews
+
+### Create PPC schedule referencing current approved workstation plan
+POST {{base}}/api/styles/{{styleId}}/schedules
+Content-Type: application/json
+
+{"productionLineId":"REPLACE_WITH_LINE_ID","workstationPlanId":"REPLACE_WITH_WORKSTATION_PLAN_ID","orderQuantity":1000,"targetDailyQuantity":100,"plannedStartDate":"2027-01-15","sourceReference":"PPC-PLAN-2027-001"}
+
+### Confirm PPC schedule (MANUAL, not APS verification)
+POST {{base}}/api/schedules/{{scheduleId}}/confirm
+Content-Type: application/json
+
+{"confirmedBy":"PPC Planner"}
+
+### Check gate
+GET {{base}}/api/styles/{{styleId}}/readiness
+
+### Release only after all checks passed
+POST {{base}}/api/styles/{{styleId}}/release
+Content-Type: application/json
+
+{"lineCode":"A01","plannedStartDate":"2027-01-15","approvedBy":"Production Manager"}
+
+### Retrieve stored handover payload after Release, no automatic ERP/MES delivery
+GET {{base}}/api/releases/{{releaseId}}/handover

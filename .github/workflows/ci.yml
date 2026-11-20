@@ -1,0 +1,22 @@
+name: .NET Build
+on:
+  push:
+    branches: [ main, "feat/**" ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore src/GarmentStylePilot.Api/GarmentStylePilot.Api.csproj
+      - name: Build
+        run: dotnet build src/GarmentStylePilot.Api/GarmentStylePilot.Api.csproj -c Release --no-restore
+      - name: Validate browser JavaScript syntax
+        run: node --check src/GarmentStylePilot.Api/wwwroot/app.js
+      - name: End-to-end API smoke test
+        run: python3 tests/smoke_api.py
