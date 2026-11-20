@@ -1,76 +1,92 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GarmentStylePilot | Apparel Product Readiness</title>
-<style>
-:root{font-family:Inter,system-ui,Segoe UI,sans-serif;color:#163145;background:#f4f7f9}
-*{box-sizing:border-box}body{margin:0}header{padding:20px max(24px,calc((100vw - 1100px)/2));background:#103145;color:white;display:flex;justify-content:space-between;align-items:center}
-.logo{font-size:23px;font-weight:750}.logo span{color:#50ddce}small{color:#a8c4cd}
-main{max-width:1100px;margin:32px auto;padding:0 20px}h1{font-size:29px;margin:0 0 5px}p{color:#607481}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:25px 0}.card,section{background:#fff;border:1px solid #dfe7ed;border-radius:14px;padding:21px;box-shadow:0 3px 10px #132b3d08}
-.num{font-size:30px;font-weight:750}.muted{color:#647987;font-size:13px;margin-top:6px}
-.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px}
-button{background:#116b74;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:650;cursor:pointer}
-button:hover{background:#0b555b}input{padding:11px;border:1px solid #ccd9e0;border-radius:8px;width:100%;margin:6px 0}
-form{display:grid;grid-template-columns:1fr 1fr 1.5fr auto;gap:9px;align-items:end;margin:15px 0}
-table{width:100%;border-collapse:collapse;margin-top:15px}th,td{text-align:left;padding:12px;border-bottom:1px solid #e8eef2;font-size:14px}th{color:#667d88;font-weight:600}.tag{background:#e4f6f3;color:#15776c;border-radius:20px;padding:5px 9px;font-size:12px}
-a{color:#087b82;text-decoration:none}pre{background:#102d40;color:#e5f8f6;border-radius:9px;padding:14px;overflow:auto;font-size:12px}
-@media(max-width:740px){.cards{grid-template-columns:1fr 1fr}form{grid-template-columns:1fr}header{padding:16px 20px}.toolbar{flex-wrap:wrap}table{display:block;overflow:auto}}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#122e41">
+  <meta name="description" content="GarmentStylePilot - Apparel development, industrial engineering and production readiness">
+  <title>GarmentStylePilot — Product Development Workspace</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
-<header><div class="logo">Garment<span>StylePilot</span></div><small>Sample → Production Readiness</small></header>
-<main>
-<h1>Style Development Workspace</h1>
-<p>Manage apparel style records from sampling and engineering to commercial costing and production release.</p>
-<div class="cards">
-<div class="card"><div id="total" class="num">–</div><div class="muted">Total styles</div></div>
-<div class="card"><div id="dev" class="num">–</div><div class="muted">In development</div></div>
-<div class="card"><div id="approved" class="num">–</div><div class="muted">Approved samples</div></div>
-<div class="card"><div id="released" class="num">–</div><div class="muted">Production released</div></div>
-</div>
-<section>
-<div class="toolbar"><h2>Styles</h2><button onclick="document.getElementById('newStyle').hidden=!document.getElementById('newStyle').hidden">+ New Style</button></div>
-<form id="newStyle" hidden>
-<label>Style code<input name="code" placeholder="ST-2027-001" required></label>
-<label>Customer<input name="customer" placeholder="Customer" required></label>
-<label>Description<input name="description" placeholder="Product description"></label>
-<button type="submit">Create</button>
-</form>
-<div id="message" role="status"></div>
-<table><thead><tr><th>Style</th><th>Customer</th><th>Description</th><th>Status</th><th>Record</th></tr></thead><tbody id="rows"></tbody></table>
-</section>
-<section style="margin-top:18px"><h2>Developer API</h2>
-<p>Use the endpoints to capture BOM, sample approval, IE operations, cost sheets, quotation and readiness checks.</p>
-<pre>GET  /api/styles
-POST /api/styles
-GET  /api/styles/{id}
-GET  /api/styles/{id}/readiness
-POST /api/styles/{id}/release
-GET  /openapi/v1.json (Development)</pre>
-</section>
-</main>
-<script>
-const e=id=>document.getElementById(id);
-const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function request(path,options={}){
- const key=sessionStorage.getItem('gsp_api_key');
- const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(key?{'X-Api-Key':key}:{}),...(options.headers||{})}});
- const data=await response.json();
- if(!response.ok)throw new Error(data.error||'API request failed');
- return data;
-}
-async function reload(){
- try{
- const [stats,styles]=await Promise.all([request('/api/dashboard'),request('/api/styles')]);
- e('total').textContent=stats.styles;e('dev').textContent=stats.inDevelopment;
- e('approved').textContent=stats.samplesApproved;e('released').textContent=stats.released;
- e('rows').innerHTML=styles.map(s=>'<tr><td><strong>'+escapeHtml(s.code)+'</strong></td><td>'+escapeHtml(s.customer)+'</td><td>'+escapeHtml(s.description)+'</td><td><span class="tag">'+escapeHtml(s.status)+'</span></td><td><button data-style="'+escapeHtml(s.id)+'">View JSON</button></td></tr>').join('')||'<tr><td colspan="5">No styles yet. Create the first style.</td></tr>';
- document.querySelectorAll('[data-style]').forEach(b=>b.onclick=async()=>{try{const v=await request('/api/styles/'+b.dataset.style);const win=window.open('','_blank');if(win){win.document.title='Style details';const pre=win.document.createElement('pre');pre.textContent=JSON.stringify(v,null,2);win.document.body.append(pre);}}catch(err){e('message').textContent=err.message;}});
- }catch(err){e('message').textContent=err.message+' — If API key is enabled, set sessionStorage.gsp_api_key in developer tools.'}
-}
-e('newStyle').onsubmit=async event=>{event.preventDefault();const form=event.target;const data=Object.fromEntries(new FormData(form));data.currency='USD';try{await request('/api/styles',{method:'POST',body:JSON.stringify(data)});form.reset();form.hidden=true;e('message').textContent='Style created.';await reload();}catch(err){e('message').textContent=err.message}};
-reload();
-</script>
-</body></html>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div><strong>Garment<span>StylePilot</span></strong><small>APPAREL OPERATIONS</small></div>
+      </div>
+      <div class="nav-heading">WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <button class="nav-item active" data-action="jump" data-target="overview"><span class="nav-icon">◫</span> Tổng quan</button>
+        <button class="nav-item" data-action="jump" data-target="style-section"><span class="nav-icon">▤</span> Phát triển mã hàng</button>
+        <button class="nav-item" data-action="jump" data-target="style-section" data-tab="readiness"><span class="nav-icon">✓</span> Production Readiness</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="side-kicker">PROCESS FRAMEWORK</div>
+        <p>Sample → IE → Costing → Line Release</p>
+        <div class="side-separator"></div>
+        <span class="env-label"><span class="status-dot"></span> MVP / Development</span>
+      </div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div><span class="eyebrow">Garment Engineering Platform</span><h1>Product Development</h1></div>
+        <div class="topbar-actions">
+          <label class="actor-field">Người thao tác <input id="actor" autocomplete="name" placeholder="Nhập tên (MVP)" aria-label="Người thao tác; chưa xác thực danh tính"></label>
+          <button class="button primary" data-action="new-style">+ Tạo mã hàng</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="overview" aria-label="Summary" class="overview">
+          <div class="section-heading"><div><span class="eyebrow">WORKSPACE OVERVIEW</span><h2>Toàn bộ vòng đời trước sản xuất</h2></div><span class="subtle" id="lastUpdated"></span></div>
+          <div id="summary" class="stat-grid">
+            <div class="stat-card"><div class="skeleton"></div></div>
+            <div class="stat-card"><div class="skeleton"></div></div>
+            <div class="stat-card"><div class="skeleton"></div></div>
+            <div class="stat-card"><div class="skeleton"></div></div>
+          </div>
+          <div class="milestones" aria-label="Business stages">
+            <div><span class="milestone-no">01</span><strong>Sample</strong><small>Tech Pack · Fit</small></div>
+            <span class="milestone-arrow">→</span>
+            <div><span class="milestone-no">02</span><strong>IE Engineering</strong><small>Routing · SMV</small></div>
+            <span class="milestone-arrow">→</span>
+            <div><span class="milestone-no">03</span><strong>Cost & Quote</strong><small>BOM · CM · FOB</small></div>
+            <span class="milestone-arrow">→</span>
+            <div><span class="milestone-no">04</span><strong>Line Readiness</strong><small>PP · Pilot · Release</small></div>
+          </div>
+        </section>
+        <section id="style-section" class="content-section" aria-label="Style workspace">
+          <div class="section-heading"><div><span class="eyebrow">STYLE WORKSPACE</span><h2>Mã hàng &amp; kỹ thuật sản xuất</h2></div></div>
+          <div class="workspace-grid">
+            <div class="styles-panel panel">
+              <div class="panel-heading"><strong>Danh sách mã hàng</strong><span id="styleCount" class="count-pill">0</span></div>
+              <label class="search-field"><span aria-hidden="true">⌕</span><input id="styleSearch" placeholder="Tìm theo mã, khách hàng..." aria-label="Tìm mã hàng"></label>
+              <div id="styleList" class="style-list" aria-live="polite"><div class="empty">Đang tải...</div></div>
+            </div>
+            <div class="detail-panel panel" id="detailPanel" aria-live="polite">
+              <div class="empty-workspace"><div class="empty-graphic">▤</div><h3>Chọn một mã hàng để bắt đầu</h3><p>Quản lý Sample, BOM, GST/SMV, Costing và Production Readiness trong một nơi.</p><button class="button primary" data-action="new-style">Tạo mã hàng đầu tiên</button></div>
+            </div>
+          </div>
+        </section>
+        <footer>GarmentStylePilot · Prototype · Các phê duyệt hiện dùng tên nhập tay, chưa thay thế hệ thống IAM/SSO doanh nghiệp.</footer>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="styleDialog" aria-labelledby="dialogTitle">
+    <form id="createStyleForm">
+      <div class="dialog-header"><div><span class="eyebrow">NEW APPAREL STYLE</span><h2 id="dialogTitle">Tạo mã hàng</h2></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="Đóng">×</button></div>
+      <label>Mã hàng <input name="code" placeholder="VD: ST-2027-001" maxlength="64" required></label>
+      <label>Khách hàng <input name="customer" placeholder="Brand / Customer" maxlength="100" required></label>
+      <label>Mô tả <textarea name="description" rows="3" placeholder="Loại sản phẩm, nhóm hàng..."></textarea></label>
+      <label>Đơn vị tiền tệ <select name="currency"><option value="USD">USD</option><option value="TWD">TWD</option><option value="VND">VND</option></select></label>
+      <div class="dialog-actions"><button type="button" class="button ghost" data-action="close-dialog">Hủy</button><button type="submit" class="button primary">Tạo mã hàng</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
